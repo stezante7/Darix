@@ -1,5 +1,7 @@
 # Darix
 
+[![Build and deploy](https://github.com/stezante7/Darix/actions/workflows/deploy.yml/badge.svg)](https://github.com/stezante7/Darix/actions/workflows/deploy.yml)
+
 A falling-block puzzle game where you wear pieces down by colour instead of clearing lines.
 
 <img src="screenshot.png" alt="Darix in play: score, multiplier, speed and next piece on the left, the board with numbered coloured pieces on the right" width="360">
@@ -30,12 +32,19 @@ On a phone, use your browser's "Install app" or "Add to Home screen" to get it a
 | Restart   | R        | Tap after game over |
 | Mute      | M        | 🔊 button           |
 
-## Running it locally
+## Building
+
+You need Node.js 22.12 or newer.
 
     npm install
-    npm run dev
+    npm run dev       # dev server with hot reload
+    npm test          # run the tests
+    npm run build     # type-check and build the static site into dist/
+    npm run preview   # serve the built site locally
 
-`npm test` runs the tests. `npm run build` writes the static site to `dist/`. Every push to `main` deploys to GitHub Pages.
+The build is a plain static site with relative paths, so `dist/` can be hosted from any folder.
+
+Every push to `main` runs [the deploy workflow](.github/workflows/deploy.yml): it installs dependencies, runs the tests, builds, and publishes `dist/` to GitHub Pages. If the tests fail, nothing is published. The badge at the top shows the latest run.
 
 ## Credits and licence
 
