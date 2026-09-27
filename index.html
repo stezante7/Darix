@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#262626" />
+    <title>Darix</title>
+  </head>
+  <body>
+    <main id="app">
+      <div class="game-layout">
+        <aside class="sidebar" aria-label="Game information">
+          <div class="brand" aria-label="Darix">
+            <span>D</span><span>A</span><span>R</span><span>I</span><span>X</span>
+          </div>
+          <div class="sidebar-stats" aria-live="polite">
+            <div class="stat-row score-pot">
+              <span>Score</span>
+              <strong id="score" class="score-value">0</strong>
+            </div>
+            <div class="stat-row multiplier-card">
+              <span>Multiplier</span>
+              <strong id="multiplier">×1</strong>
+            </div>
+            <div class="stat-row speed-card">
+              <span>Speed</span>
+              <strong id="speed">1.0×</strong>
+            </div>
+          </div>
+          <section class="next-piece" aria-label="Next piece">
+            <h2>Next</h2>
+            <div id="next-piece-preview" role="img" aria-label="Next piece preview"></div>
+          </section>
+          <button id="mute-toggle" class="mute-toggle" type="button" aria-pressed="false" aria-label="Mute sound" title="Mute (M)">🔊</button>
+        </aside>
+        <section class="game-shell" aria-label="Darix game">
+          <div id="game-container"></div>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
