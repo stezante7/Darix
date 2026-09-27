@@ -95,3 +95,7 @@ From 1.5× speed, a new piece can have two colors; the chance grows with speed a
 ## Installable app with an orange D icon · 2026-09-27
 
 Darix is a PWA: a web manifest, an orange "D" icon on a dark rounded square (plus a maskable version for Android), and a service worker that caches the game, icons and sounds so it runs offline. Pages load network-first so new deploys appear on the next launch.
+
+## Gentler difficulty curve · 2026-09-27
+
+Feedback said the game got too hard too fast. A hit now adds +0.1× at 1×, shrinking to +0.05× at 5×; a miss takes off 0.07×. At a 50% hit rate, 2× takes about 86 pieces (was 20); at 60%, about 36 (was 13); below a 50% hit rate, speed stays near 1×. Multi-color pieces now start at 2× and reach at most 60% at 5×, and three colors start at 3.5×. This refines "Multi-color pieces as speed rises."

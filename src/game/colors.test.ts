@@ -10,13 +10,12 @@ function sequence(...values: number[]) {
 describe('piece colors', () => {
   it('keeps every piece single-color at low speed', () => {
     expect(multiColorChance(1)).toBe(0);
-    expect(multiColorChance(1.5)).toBe(0);
+    expect(multiColorChance(2)).toBe(0);
     expect(pieceColors(1.2, 4, 6, sequence(0.5, 0))).toEqual([3, 3, 3, 3]);
   });
 
   it('makes multi-color pieces more likely as speed rises, up to a cap', () => {
-    expect(multiColorChance(2.75)).toBeCloseTo(MAX_MULTI_COLOR_CHANCE / 2);
-    expect(multiColorChance(4)).toBe(MAX_MULTI_COLOR_CHANCE);
+    expect(multiColorChance(3.5)).toBeCloseTo(MAX_MULTI_COLOR_CHANCE / 2);
     expect(multiColorChance(5)).toBe(MAX_MULTI_COLOR_CHANCE);
   });
 
@@ -26,7 +25,7 @@ describe('piece colors', () => {
       state = (state * 16807) % 2147483647;
       return state / 2147483647;
     };
-    const counts = Array.from({ length: 200 }, () => new Set(pieceColors(2.9, 4, 6, random)).size);
+    const counts = Array.from({ length: 200 }, () => new Set(pieceColors(3.4, 4, 6, random)).size);
 
     expect(Math.max(...counts)).toBe(2);
     expect(counts).toContain(1);

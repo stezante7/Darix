@@ -181,10 +181,11 @@ describe('Darix board rules', () => {
   });
 
   it('speeds up on a hit, slows down on a miss, and stays within bounds', () => {
-    expect(nextSpeed(1, true)).toBe(1.2);
-    expect(nextSpeed(1.2, false)).toBe(1.1);
+    expect(nextSpeed(1, true)).toBe(1.1);
+    expect(nextSpeed(3, true)).toBe(3.08);
+    expect(nextSpeed(4.98, true)).toBe(5);
+    expect(nextSpeed(1.2, false)).toBe(1.13);
     expect(nextSpeed(1, false)).toBe(1);
-    expect(nextSpeed(4.9, true)).toBe(5);
     expect(dropIntervalForSpeed(1)).toBe(700);
     expect(dropIntervalForSpeed(2)).toBe(350);
     expect(dropIntervalForSpeed(5)).toBe(140);

@@ -1,13 +1,13 @@
 import { RandomSource } from './board';
 
 /** Multi-color pieces start appearing at this speed... */
-export const MULTI_COLOR_FROM_SPEED = 1.5;
+export const MULTI_COLOR_FROM_SPEED = 2;
 /** ...become more likely until this speed... */
-export const MULTI_COLOR_FULL_SPEED = 4;
+export const MULTI_COLOR_FULL_SPEED = 5;
 /** ...up to this chance per piece. */
-export const MAX_MULTI_COLOR_CHANCE = 0.75;
+export const MAX_MULTI_COLOR_CHANCE = 0.6;
 /** From this speed a multi-color piece can have three colors instead of two. */
-export const THREE_COLORS_FROM_SPEED = 3;
+export const THREE_COLORS_FROM_SPEED = 3.5;
 
 export function multiColorChance(speed: number): number {
   const progress = (speed - MULTI_COLOR_FROM_SPEED) / (MULTI_COLOR_FULL_SPEED - MULTI_COLOR_FROM_SPEED);
