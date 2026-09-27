@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#1c1c1c"/>
+  <!-- Scaled to 70% around the centre so the D stays inside Android's maskable safe zone. -->
+  <g transform="translate(256 256) scale(0.7) translate(-256 -256)">
+    <path fill="#f97316" fill-rule="evenodd"
+      d="M121 106H241A150 150 0 0 1 241 406H121Z M196 181V331H241A75 75 0 0 0 241 181Z"/>
+  </g>
+</svg>

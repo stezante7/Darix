@@ -30,9 +30,9 @@ body {
   --sidebar-w: clamp(9rem, 20vw, 14rem);
   width: 100%;
   height: 100%;
-  padding: var(--pad-y) var(--pad-x);
-  padding-top: max(var(--pad-y), env(safe-area-inset-top));
-  padding-bottom: max(var(--pad-y), env(safe-area-inset-bottom));
+  --pad-top: max(var(--pad-y), env(safe-area-inset-top));
+  --pad-bottom: max(var(--pad-y), env(safe-area-inset-bottom));
+  padding: var(--pad-top) var(--pad-x) var(--pad-bottom);
 }
 
 /* Sidebar on the left; board on the right, as tall as the viewport allows (10x20 board => width = height / 2). */
@@ -41,7 +41,7 @@ body {
   height: 100%;
   display: grid;
   grid-template-areas: "sidebar board";
-  grid-template-columns: var(--sidebar-w) minmax(0, calc((100dvh - var(--pad-y) * 2) / 2));
+  grid-template-columns: var(--sidebar-w) minmax(0, calc((100dvh - var(--pad-top) - var(--pad-bottom)) / 2));
   grid-template-rows: minmax(0, 1fr);
   justify-content: center;
   gap: clamp(0.5rem, 3vw, 2.5rem);
@@ -201,14 +201,17 @@ body {
   .stat-row strong { font-size: 1.25rem; }
 }
 
-/* Phones: condense the sidebar into one slim bar above the board so the board gets the full width. */
+/*
+ * Phones: condense the sidebar into one slim bar above the board. The bar has a fixed height so the
+ * column can be sized to the board (width = remaining height / 2), keeping bar and board the same width.
+ */
 @media (max-width: 560px) {
-  #app { --pad-x: 0.35rem; }
+  #app { --pad-x: 0.35rem; --bar-h: 3.6rem; --bar-gap: 0.35rem; }
   .game-layout {
     grid-template-areas: "sidebar" "board";
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-    gap: 0.35rem;
+    grid-template-columns: minmax(0, calc((100dvh - var(--pad-top) - var(--pad-bottom) - var(--bar-h) - var(--bar-gap)) / 2));
+    grid-template-rows: var(--bar-h) minmax(0, 1fr);
+    gap: var(--bar-gap);
   }
   .sidebar {
     display: grid;
@@ -222,6 +225,7 @@ body {
     background: #0f172acc;
   }
   .brand { grid-area: brand; font-size: 1.25rem; }
+  .sidebar { container-type: inline-size; }
   .sidebar-stats { grid-area: stats; gap: 0.15rem; }
   .stat-row {
     justify-content: flex-start;
@@ -250,4 +254,9 @@ body {
   }
   .preview-cell { border-radius: 2px; font-size: 7px; }
   .mute-toggle { grid-area: mute; align-self: center; padding: 0.25rem 0.35rem; font-size: 0.85rem; }
+}
+
+/* A very narrow bar (short phones, where the board is narrow too) has no room for the title. */
+@container (max-width: 250px) {
+  .brand { display: none; }
 }

@@ -21,9 +21,10 @@ export interface Point {
 export interface ActivePiece {
   blocks: Point[];
   resolves: number[];
+  /** One color per block, in the same order as `blocks`. */
+  colors: number[];
   x: number;
   y: number;
-  color: number;
 }
 
 export interface RandomSource {
@@ -74,7 +75,7 @@ export function lockPiece(
   nextGroupId += 1;
   for (const [index, block] of piece.blocks.entries()) {
     locked[piece.y + block.y][piece.x + block.x] = {
-      color: piece.color,
+      color: piece.colors[index],
       resolve: piece.resolves[index] ?? randomResolve(random),
       group,
     };
@@ -166,13 +167,27 @@ function destroyResolved(board: Board): DestroyedCell[] {
   return destroyed;
 }
 
-/** Turns every complete row the given color and returns the recolored row indexes. */
-function recolorFullRows(board: Board, color: number): number[] {
-  const rows: number[] = [];
+export interface RecoloredRow {
+  y: number;
+  color: number;
+}
+
+/**
+ * Turns every complete row the color of the landing piece's square in that row (or of its first
+ * square, for a row that was already full) and reports what changed.
+ */
+function recolorFullRows(board: Board, landingPieceCells: Point[]): RecoloredRow[] {
+  const rows: RecoloredRow[] = [];
+  const landingColor = (y: number) => {
+    const cell = landingPieceCells.find((point) => point.y === y) ?? landingPieceCells[0];
+    return board[cell.y][cell.x]?.color;
+  };
   for (const [y, row] of board.entries()) {
     if (!row.every((cell) => cell !== null)) continue;
+    const color = landingColor(y);
+    if (color === undefined) continue;
     for (const cell of row) if (cell) cell.color = color;
-    rows.push(y);
+    rows.push({ y, color });
   }
   return rows;
 }
@@ -276,9 +291,7 @@ export interface ResolveResult {
   /** The lock made a new same-color contact or completed a row. */
   hit: boolean;
   /** Rows that were completed and turned the landing piece's color. */
-  recoloredRows: number[];
-  /** The color complete rows turned, when any did. */
-  rowColor?: number;
+  recoloredRows: RecoloredRow[];
 }
 
 export function resolveLock(
@@ -288,11 +301,8 @@ export function resolveLock(
 ): ResolveResult {
   const resolved = cloneBoard(board);
   // A completed row takes the landing piece's color, so it then resolves like one big color match.
-  const landingColor = lockedPieceCells.length > 0
-    ? resolved[lockedPieceCells[0].y][lockedPieceCells[0].x]?.color
-    : undefined;
-  const recoloredRows = landingColor === undefined ? [] : recolorFullRows(resolved, landingColor);
-  const rowCells = recoloredRows.flatMap((y) => Array.from({ length: BOARD_WIDTH }, (_, x) => ({ x, y })));
+  const recoloredRows = lockedPieceCells.length > 0 ? recolorFullRows(resolved, lockedPieceCells) : [];
+  const rowCells = recoloredRows.flatMap(({ y }) => Array.from({ length: BOARD_WIDTH }, (_, x) => ({ x, y })));
   const contacts = getSameColorContacts(resolved, beforeLock, [...lockedPieceCells, ...rowCells], lockedPieceCells);
   // Only a color match breaks pieces into loose squares: the landing piece and the pieces it touched.
   const loosenedOnLock = loosenContactPieces(resolved, contacts);
@@ -322,7 +332,6 @@ export function resolveLock(
     loosenedCells: [...loosenedOnLock, ...loosenedAfterGravity],
     hit: contacts.length > 0 || gravityContacts.length > 0 || recoloredRows.length > 0,
     recoloredRows,
-    rowColor: recoloredRows.length > 0 ? landingColor : undefined,
   };
 }
 
@@ -343,13 +352,18 @@ export const SHAPES: Point[][] = [
   [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 1 }],
 ];
 
-export function createPiece(shapeIndex: number, color: number, random: RandomSource = Math.random): ActivePiece {
+/** Creates a piece in one color, or with one color per block when given a list. */
+export function createPiece(
+  shapeIndex: number,
+  color: number | number[],
+  random: RandomSource = Math.random,
+): ActivePiece {
   const blocks = SHAPES[shapeIndex % SHAPES.length].map((block) => ({ ...block }));
   return {
     blocks,
     resolves: blocks.map(() => randomResolve(random)),
+    colors: blocks.map((_, index) => (Array.isArray(color) ? color[index % color.length] : color)),
     x: 3,
     y: 0,
-    color,
   };
 }

@@ -6,6 +6,8 @@ import {
   ActivePiece,
   Board,
   DestroyedCell,
+  RecoloredRow,
+  SHAPES,
   canPlace,
   createEmptyBoard,
   createPiece,
@@ -13,10 +15,18 @@ import {
   resolveLock,
   rotateBlocks,
 } from './game/board';
+import { pieceColors } from './game/colors';
 import { MIN_SPEED, dropIntervalForSpeed, nextSpeed } from './game/speed';
 import { nextMultiplier } from './game/multiplier';
 import { getPiecePreview } from './game/preview';
 import './style.css';
+
+// Lets the game install as an app and run offline. Skipped in dev so it never caches Vite's dev server.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => undefined);
+  });
+}
 
 const COLORS = [0xf97316, 0x22d3ee, 0xa78bfa, 0xf43f5e, 0x84cc16, 0xfacc15];
 const TITLE_COLORS = [0xf97316, 0xfacc15, 0x22d3ee, 0xa78bfa, 0xf43f5e];
@@ -247,7 +257,7 @@ class DarixScene extends Phaser.Scene {
     if (!this.started || this.gameOver) return;
     const rotated = { ...this.activePiece, blocks: rotateBlocks(this.activePiece.blocks) };
     if (canPlace(this.board, rotated)) {
-      this.activePiece = { ...rotated, color: (rotated.color + 1) % COLORS.length };
+      this.activePiece = { ...rotated, colors: rotated.colors.map((color) => (color + 1) % COLORS.length) };
       this.draw();
     }
   }
@@ -290,7 +300,8 @@ class DarixScene extends Phaser.Scene {
   }
 
   private createRandomPiece(): ActivePiece {
-    return createPiece(Phaser.Math.Between(0, 6), Phaser.Math.Between(0, COLORS.length - 1));
+    const shape = Phaser.Math.Between(0, SHAPES.length - 1);
+    return createPiece(shape, pieceColors(this.speed, SHAPES[shape].length, COLORS.length));
   }
 
   private updateNextPiecePreview(): void {
@@ -332,7 +343,7 @@ class DarixScene extends Phaser.Scene {
     this.playSfx(result.destroyed > 0 ? 'clear-combo' : 'button');
     if (this.speed > FAST_MUSIC_SPEED) this.playMusic('game-loop2');
     else if (this.speed <= CALM_MUSIC_SPEED) this.playMusic('game-loop1');
-    if (result.rowColor !== undefined) this.sweepRows(result.recoloredRows, result.rowColor);
+    this.sweepRows(result.recoloredRows);
     this.sendScoreParticles(result.destroyedCells, pointsPerSquare);
     this.shatterLoosened(result.loosenedCells);
     this.spawnPiece();
@@ -433,10 +444,10 @@ class DarixScene extends Phaser.Scene {
   }
 
   /** Sweeps the new color across each completed row so the recolor is easy to follow. */
-  private sweepRows(rows: number[], colorIndex: number): void {
+  private sweepRows(rows: RecoloredRow[]): void {
     const width = BOARD_WIDTH * this.cellSize;
-    for (const y of rows) {
-      const bar = this.add.rectangle(0, y * this.cellSize + this.cellSize / 2, width, this.cellSize, COLORS[colorIndex % COLORS.length], 0.9)
+    for (const { y, color } of rows) {
+      const bar = this.add.rectangle(0, y * this.cellSize + this.cellSize / 2, width, this.cellSize, COLORS[color % COLORS.length], 0.9)
         .setOrigin(0, 0.5)
         .setDepth(4)
         .setScale(0, 1)
@@ -516,58 +527,57 @@ class DarixScene extends Phaser.Scene {
       }
     }
 
-    // Squares of the same intact piece are bridged into one solid shape; loose squares stay separate tiles.
-    const sameGroup = (x: number, y: number, group: number | undefined) =>
-      group !== undefined && this.board[y]?.[x]?.group === group;
+    // Squares of the same intact piece join into one solid shape (colors meet at a clean edge);
+    // loose squares stay separate tiles.
     for (let y = 0; y < BOARD_HEIGHT; y += 1) {
       for (let x = 0; x < BOARD_WIDTH; x += 1) {
         const cell = this.board[y][x];
         if (!cell) continue;
-        this.drawCell(x, y, cell.color, cell.resolve, {
-          right: sameGroup(x + 1, y, cell.group),
-          down: sameGroup(x, y + 1, cell.group),
-          corner: sameGroup(x + 1, y + 1, cell.group),
-        });
+        this.drawCell(x, y, cell.color, cell.resolve, (dx, dy) =>
+          cell.group !== undefined && this.board[y + dy]?.[x + dx]?.group === cell.group);
       }
     }
 
     if (!this.gameOver) {
       const piece = this.activePiece;
-      const has = (x: number, y: number) => piece.blocks.some((block) => block.x === x && block.y === y);
       for (const [index, block] of piece.blocks.entries()) {
-        this.drawCell(piece.x + block.x, piece.y + block.y, piece.color, piece.resolves[index] ?? 1, {
-          right: has(block.x + 1, block.y),
-          down: has(block.x, block.y + 1),
-          corner: has(block.x + 1, block.y + 1),
-        });
+        this.drawCell(piece.x + block.x, piece.y + block.y, piece.colors[index], piece.resolves[index] ?? 1, (dx, dy) =>
+          piece.blocks.some((other) => other.x === block.x + dx && other.y === block.y + dy));
       }
     }
   }
 
+  /** Draws one square; `linked(dx, dy)` says whether the neighbour at that offset belongs to the same piece. */
   private drawCell(
     x: number,
     y: number,
     colorIndex: number,
     resolve: number | string,
-    links: { right: boolean; down: boolean; corner: boolean },
+    linked: (dx: number, dy: number) => boolean,
   ): void {
-    const color = COLORS[colorIndex % COLORS.length];
+    const size = this.cellSize;
     const inset = 2;
-    const left = x * this.cellSize;
-    const top = y * this.cellSize;
-    this.boardGraphics.fillStyle(color, 1);
-    this.boardGraphics.fillRoundedRect(
-      left + inset,
-      top + inset,
-      this.cellSize - inset * 2,
-      this.cellSize - inset * 2,
-      5,
-    );
-    const inner = this.cellSize - inset * 2;
-    if (links.right) this.boardGraphics.fillRect(left + this.cellSize - inset - 5, top + inset, inset * 2 + 10, inner);
-    if (links.down) this.boardGraphics.fillRect(left + inset, top + this.cellSize - inset - 5, inner, inset * 2 + 10);
-    if (links.right && links.down && links.corner) {
-      this.boardGraphics.fillRect(left + this.cellSize - inset - 5, top + this.cellSize - inset - 5, inset * 2 + 10, inset * 2 + 10);
+    const inner = size - inset * 2;
+    const left = x * size;
+    const top = y * size;
+    const [l, r, u, d] = [linked(-1, 0), linked(1, 0), linked(0, -1), linked(0, 1)];
+    const radius = (joined: boolean) => (joined ? 0 : 5);
+    this.boardGraphics.fillStyle(COLORS[colorIndex % COLORS.length], 1);
+    this.boardGraphics.fillRoundedRect(left + inset, top + inset, inner, inner, {
+      tl: radius(l || u),
+      tr: radius(r || u),
+      bl: radius(l || d),
+      br: radius(r || d),
+    });
+    // Fill the gutter up to the cell edge on every joined side, and the corner where three neighbours join.
+    if (l) this.boardGraphics.fillRect(left, top + inset, inset, inner);
+    if (r) this.boardGraphics.fillRect(left + size - inset, top + inset, inset, inner);
+    if (u) this.boardGraphics.fillRect(left + inset, top, inner, inset);
+    if (d) this.boardGraphics.fillRect(left + inset, top + size - inset, inner, inset);
+    for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      if (linked(dx, 0) && linked(0, dy) && linked(dx, dy)) {
+        this.boardGraphics.fillRect(dx < 0 ? left : left + size - inset, dy < 0 ? top : top + size - inset, inset, inset);
+      }
     }
     const text = this.add.text(
       x * this.cellSize + this.cellSize / 2,

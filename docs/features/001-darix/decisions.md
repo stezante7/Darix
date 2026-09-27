@@ -87,3 +87,11 @@ When a lock completes a row, the whole row turns the color of the piece that com
 ## Sound effects and music · 2026-09-27
 
 A short click plays on start, restart, and each lock without destruction; a combo sound plays when a lock destroys squares; a game-over sting plays at the end. The first music loop plays during the game and switches to the second above 2.5× speed, back below 2×. M or the speaker button mutes everything, and the choice is remembered on this device.
+
+## Multi-color pieces as speed rises · 2026-09-27
+
+From 1.5× speed, a new piece can have two colors; the chance grows with speed and caps at 75% from 4×. From 3×, a multi-color piece can have three colors. Rotation advances every square's color by one. A completed row takes the color of the landing piece's square in that row. Pieces still draw as one solid shape, with a clean edge where two colors meet. This adds difficulty because fewer squares match.
+
+## Installable app with an orange D icon · 2026-09-27
+
+Darix is a PWA: a web manifest, an orange "D" icon on a dark rounded square (plus a maskable version for Android), and a service worker that caches the game, icons and sounds so it runs offline. Pages load network-first so new deploys appear on the next launch.

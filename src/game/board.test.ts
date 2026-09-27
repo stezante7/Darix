@@ -204,14 +204,27 @@ describe('Darix board rules', () => {
   it('turns a completed row the landing piece color and wears it like one big match', () => {
     const result = completeBottomRow(5);
 
-    expect(result.recoloredRows).toEqual([19]);
-    expect(result.rowColor).toBe(1);
+    expect(result.recoloredRows).toEqual([{ y: 19, color: 1 }]);
     expect(result.board[19].every((cell) => cell?.color === 1)).toBe(true);
     // Inner squares touch a new same-color neighbour on both sides; the far edge only on one.
     expect(result.board[19][5]?.resolve).toBe(3);
     expect(result.board[19][9]?.resolve).toBe(4);
     expect(result.board[19][5]?.group).toBeUndefined();
     expect(result.sameColorDestroyed).toBe(false);
+  });
+
+  it('recolors a row to the color of the landing square in that row', () => {
+    const before = createEmptyBoard();
+    for (let x = 2; x < BOARD_WIDTH; x += 1) before[19][x] = { color: 2 + (x % 2), resolve: 5 };
+    // O piece: top squares color 4, bottom squares color 5; only the bottom ones complete row 19.
+    const piece = createPiece(1, [4, 4, 5, 5], () => 0.5);
+    piece.x = 0;
+    piece.y = 18;
+
+    const result = resolveLock(lockPiece(before, piece), before, pieceCells(piece));
+
+    expect(result.recoloredRows).toEqual([{ y: 19, color: 5 }]);
+    expect(result.board[18][0]?.color).toBe(4);
   });
 
   it('counts squares destroyed by a recolored row as same-color destruction', () => {

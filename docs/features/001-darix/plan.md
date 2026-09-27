@@ -71,3 +71,4 @@ flowchart LR
 - 2026-09-27: Contacts now break both pieces involved (also after falling); intact pieces render as merged shapes, loose squares as tiles, with a flash-and-shards effect on break.
 - 2026-09-27: Phones now show a condensed top bar (score + multiplier, title, next piece) with the board full-width below.
 - 2026-09-27: Completed rows now recolor to the landing piece's color and resolve as one big match, with a row sweep effect; added sounds, speed-based music, and a remembered mute toggle.
+- 2026-09-27: Phone top bar now matches the board width. Added multi-color pieces that appear more often as speed rises, with per-square colors in rotation, rows, preview and drawing.

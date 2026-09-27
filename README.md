@@ -2,7 +2,11 @@
 
 A falling-block puzzle game where you wear pieces down by colour instead of clearing lines.
 
+<img src="screenshot.png" alt="Darix in play: score, multiplier, speed and next piece on the left, the board with numbered coloured pieces on the right" width="360">
+
 Play it: https://stezante7.github.io/Darix/
+
+On a phone, use your browser's "Install app" or "Add to Home screen" to get it as an app. It works offline too.
 
 ## How it plays
 

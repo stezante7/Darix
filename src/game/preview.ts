@@ -19,7 +19,7 @@ export function getPiecePreview(piece: ActivePiece): PreviewCell[] {
   return piece.blocks.map((block, index) => ({
     x: block.x - minX + offsetX,
     y: block.y - minY + offsetY,
-    color: piece.color,
+    color: piece.colors[index],
     resolve: piece.resolves[index] ?? 1,
   }));
 }
