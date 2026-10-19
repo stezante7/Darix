@@ -106,7 +106,7 @@ class DarixScene extends Phaser.Scene {
   }
 
   preload(): void {
-    for (const name of ['button', 'clear-combo', 'gameover', 'game-loop1', 'game-loop2']) {
+    for (const name of ['button', 'bubble-pop', 'clear-combo', 'gameover', 'game-loop1', 'game-loop2']) {
       this.load.audio(name, `sounds/${name}.mp3`);
     }
   }
@@ -358,6 +358,7 @@ class DarixScene extends Phaser.Scene {
     const previousSpeed = this.speed;
     this.speed = nextSpeed(this.speed, result.hit);
     this.updateSpeed(Math.sign(this.speed - previousSpeed));
+    if (result.mergedSquaresDestroyed > 0) this.playSfx('bubble-pop');
     this.playSfx(result.destroyed > 0 ? 'clear-combo' : 'button');
     if (this.speed > FAST_MUSIC_SPEED) this.playMusic('game-loop2');
     else if (this.speed <= CALM_MUSIC_SPEED) this.playMusic('game-loop1');
