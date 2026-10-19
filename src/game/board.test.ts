@@ -37,6 +37,14 @@ function strayPairs(board: Board): number {
   return strays;
 }
 
+/** Squares that are already one merged block, sharing an id. */
+function setBlock(board: Board, cells: Array<[number, number]>, color: number) {
+  const group = (blockId += 1);
+  for (const [x, y] of cells) board[y][x] = { color, group, merged: true };
+}
+
+let blockId = 100;
+
 function countGroup(board: Board, group: number | undefined): number {
   let count = 0;
   for (let y = 0; y < BOARD_HEIGHT; y += 1)
@@ -184,10 +192,11 @@ describe('monochrome row clear', () => {
     piece.y = 18;
     const result = setPiece(board, piece);
     expect(result.hit).toBe(true);
-    expect(result.destroyed).toBe(BOARD_WIDTH);
-    expect(result.clearedRows.length).toBe(1);
-    expect(result.clearedRows[0].y).toBe(19);
-    expect(result.clearedRows[0].color).toBe(1);
+    expect(result.stages.reduce((n, s) => n + s.rows.length, 0)).toBe(1);
+    expect(result.stages[0]!.rows[0].y).toBe(19);
+    expect(result.stages[0]!.rows[0].color).toBe(1);
+    // The piece matched the row and became part of it, so the whole of it went: 10 + its own 4.
+    expect(result.destroyed).toBe(BOARD_WIDTH + piece.blocks.length);
   });
 
   it('clears a full row whatever the colours, in the colour that completed it', () => {
@@ -199,9 +208,12 @@ describe('monochrome row clear', () => {
     piece.y = 17;
     const result = setPiece(board, piece);
     expect(result.hit).toBe(true);
-    expect(result.destroyed).toBe(BOARD_WIDTH);
-    // The completing block is colour 2, so the whole row goes in that colour.
-    expect(result.clearedRows[0].color).toBe(2);
+    // The row's ten squares, plus the two squares stacked above the line: the piece that completed
+    // the row is one block reaching into it, so it goes whole.
+    expect(result.destroyed).toBe(BOARD_WIDTH + 2);
+    // The completing block is colour 2, so everything it takes goes in that colour.
+    expect(result.stages[0]!.rows[0].color).toBe(2);
+    expect(result.stages[0]!.cells.every((cell) => cell.color === 2)).toBe(true);
   });
 
   it('clears a row that a fall completes', () => {
@@ -216,7 +228,7 @@ describe('monochrome row clear', () => {
     const result = setPiece(board, piece);
     expect(result.hit).toBe(true);
     expect(result.destroyed).toBe(BOARD_WIDTH);
-    expect(result.clearedRows[0].color).toBe(3);
+    expect(result.stages[0]!.rows[0].color).toBe(3);
   });
 
   it('does not clear a row with a null cell', () => {
@@ -239,8 +251,10 @@ describe('monochrome row clear', () => {
     piece.y = 17;
     const result = setPiece(board, piece);
     expect(result.hit).toBe(true);
-    expect(result.clearedRows.length).toBe(2);
-    expect(result.destroyed).toBe(BOARD_WIDTH * 2);
+    expect(result.stages.reduce((n, s) => n + s.rows.length, 0)).toBe(2);
+    // Twenty row squares, plus the four squares of the piece parked above: it merged into those
+    // rows, so they took it with them.
+    expect(result.destroyed).toBe(BOARD_WIDTH * 2 + piece.blocks.length);
   });
 
   it('counts merged squares in a cleared row', () => {
@@ -275,7 +289,8 @@ describe('merged blocks in cleared rows', () => {
     piece.y = 16;
     const result = setPiece(board, piece);
     expect(result.hit).toBe(true);
-    expect(result.destroyed).toBe(BOARD_WIDTH);
+    // The row's ten squares plus the piece's two squares above the line, taken whole with it.
+    expect(result.destroyed).toBe(BOARD_WIDTH + 2);
     // The other eight squares of the row joined the piece's block.
     expect(result.mergedSquares).toBe(BOARD_WIDTH - 2);
   });
@@ -297,6 +312,68 @@ describe('merged blocks in cleared rows', () => {
     // The two touching blocks became one, so one square changed block.
     expect(result.mergedSquares).toBe(1);
     expect(strayPairs(result.board)).toBe(0);
+  });
+});
+
+// ── A clear takes the whole block ────────────────────────────
+
+describe('a clear takes the whole block', () => {
+  it('takes the squares above the row that belong to a block inside it', () => {
+    // A merged column of colour 3 stands on the floor. Its floor square lands in the row that
+    // completes, so the whole column goes — the two squares above the line with it.
+    const board = createEmptyBoard();
+    setBlock(board, [[0, 19], [0, 18], [0, 17]], 3);
+    for (let x = 1; x <= 7; x += 1) setCells(board, [[x, 19, 1]]);
+    const piece = createPiece(1, 2);
+    piece.x = 8;
+    piece.y = 15;
+    const result = setPiece(board, piece);
+    expect(result.hit).toBe(true);
+    const stage = result.stages[0]!;
+    // Ten squares in the row (7 loose + the column's floor square + the piece's two), plus the two
+    // squares each of those two blocks had above the line.
+    expect(stage.cells.length).toBe(BOARD_WIDTH + 2 + 2);
+    for (const [x, y] of [[0, 18], [0, 17]] as const) {
+      // Painted in the row's colour while it holds, then gone from the settled board.
+      expect(stage.painted[y][x]!.color).toBe(2);
+      expect(result.board[y][x]).toBe(null);
+    }
+    // Only the column squares are worth double; the loose squares and the fresh piece are not.
+    expect(stage.cells.filter((cell) => cell.merged).length).toBe(3);
+  });
+
+  it('leaves a block alone when none of its squares reach the row', () => {
+    // The colour-3 column rests ON the floor row instead of being in it, so it is not taken — it
+    // just falls once the row under it goes.
+    const board = createEmptyBoard();
+    setBlock(board, [[0, 18], [0, 17]], 3);
+    for (let x = 0; x <= 7; x += 1) setCells(board, [[x, 19, 1]]);
+    const piece = createPiece(1, 2);
+    piece.x = 8;
+    piece.y = 15;
+    const result = setPiece(board, piece);
+    expect(result.hit).toBe(true);
+    expect(result.stages[0]!.cells.length).toBe(BOARD_WIDTH + 2);
+    expect(result.board[19][0]).not.toBe(null);
+    expect(result.board[19][0]!.color).toBe(3);
+    expect(result.board[17][0]).toBe(null);
+  });
+
+  it('takes each square of a block once when two rows clear through it', () => {
+    const board = createEmptyBoard();
+    setBlock(board, [[0, 19], [0, 18], [0, 17]], 3);
+    for (const y of [18, 19]) for (let x = 1; x < BOARD_WIDTH; x += 1) setCells(board, [[x, y, 1]]);
+    const piece = createPiece(0, 2);
+    piece.x = 3;
+    piece.y = 0;
+    const result = setPiece(board, piece);
+    expect(result.stages.length).toBe(1);
+    const stage = result.stages[0]!;
+    expect(stage.rows.map((row) => row.y)).toEqual([18, 19]);
+    // Twenty row squares plus the one column square above them, with no square counted twice.
+    expect(result.destroyed).toBe(BOARD_WIDTH * 2 + 1);
+    const keys = stage.cells.map((cell) => `${cell.x},${cell.y}`);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });
 
@@ -359,9 +436,60 @@ describe('resolveLock integration', () => {
     const result = setPiece(board, piece);
     // Loose squares fall first, so both rows reach the bottom and clear from there.
     expect(result.hit).toBe(true);
-    expect(result.clearedRows.map((r) => r.y)).toEqual([18, 19]);
-    // The piece drops into the space the clears made.
-    expect(result.board[19].filter((c) => c !== null).length).toBe(piece.blocks.length);
+    expect(result.stages.flatMap((stage) => stage.rows.map((row) => row.y))).toEqual([18, 19]);
+    // Nothing of the piece is left: it merged into those rows and went with them.
+    expect(result.destroyed).toBe(BOARD_WIDTH * 2 + piece.blocks.length);
+    expect(result.board.flat().filter((c) => c !== null).length).toBe(0);
+  });
+
+  it('reports the cleared row painted and still standing, so the change can be shown', () => {
+    // Eight loose squares in row 19; the O piece drops into the last two holes and completes it.
+    const board = createEmptyBoard();
+    for (let x = 0; x < 8; x += 1) setCells(board, [[x, 19, 1]]);
+    const piece = createPiece(1, 2);
+    piece.x = 8;
+    piece.y = 17;
+    const result = setPiece(board, piece);
+    const stage = result.stages[0]!;
+    // The snapshot holds the row intact and washed in the completing colour.
+    expect(stage.painted[19].every((cell) => cell !== null)).toBe(true);
+    expect(stage.painted[19].every((cell) => cell!.color === 2)).toBe(true);
+    // The row is gone, and so is the rest of the O piece that completed it — one block, taken whole.
+    expect(result.stages.length).toBe(1);
+    expect(result.board[19].filter((cell) => cell !== null).length).toBe(0);
+  });
+
+  it('marks the cleared squares that belong to a merged block', () => {
+    // The floor row is one merged block of ten squares. Every cleared square in it is worth double.
+    const board = createEmptyBoard();
+    for (let x = 0; x < BOARD_WIDTH; x += 1) {
+      setCells(board, [[x, 19, 1]]);
+      board[19][x]!.group = 7;
+      board[19][x]!.merged = true;
+    }
+    const piece = createPiece(0, 2);
+    piece.x = 3;
+    piece.y = 0;
+    const result = setPiece(board, piece);
+    expect(result.stages.length).toBe(1);
+    const stage = result.stages[0]!;
+    expect(stage.rows[0].y).toBe(19);
+    expect(stage.cells.filter((cell) => cell.merged).length).toBe(BOARD_WIDTH);
+    expect(stage.cells.every((cell) => cell.color === 2)).toBe(true);
+  });
+
+  it('reports which blocks grew during the lock', () => {
+    const board = createEmptyBoard();
+    setCells(board, [[2, 19, 1]]);
+    board[19][2]!.group = 3;
+    const piece = createPiece(1, 1);
+    piece.x = 3;
+    piece.y = 18;
+    const locked = lockPiece(board, piece);
+    const result = resolveLock(locked, piece.color);
+    // The run keeps the lowest id it had, so block 3 swallowed the piece and grew to five squares.
+    expect(result.mergedGroups).toEqual([3]);
+    expect(countGroup(result.board, 3)).toBe(5);
   });
 
   it('returns empty destroyed cells when nothing clears', () => {

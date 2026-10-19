@@ -5,10 +5,13 @@ import {
   POINTS_PER_SQUARE,
   ActivePiece,
   Board,
-  ClearedRow,
+  ClearStage,
+  DestroyedCell,
+  ResolveResult,
   Point,
   SHAPES,
   canPlace,
+  cloneBoard,
   createEmptyBoard,
   createPiece,
   lockPiece,
@@ -32,10 +35,18 @@ const COLORS = [0xf97316, 0x22d3ee, 0xa78bfa, 0xf43f5e, 0x84cc16, 0xfacc15];
 const SHAPE_INSET = 2;
 const CORNER_RADIUS = 5;
 
+/** A square that a row clear removed, with the points it is worth at the current multiplier. */
+type ScoredCell = DestroyedCell & { points: number };
+
 const TITLE_COLORS = [0xf97316, 0xfacc15, 0x22d3ee, 0xa78bfa, 0xf43f5e];
 const BACKGROUND = 0x262626;
 const GRID = 0x404040;
 const BEST_SCORE_KEY = 'darix.best-score';
+/* How long the completed row holds its new colour before popping, and how long the pop takes. */
+const PAINT_HOLD = 420;
+const POP_DURATION = 260;
+/** Pause between the pop of one cleared row and the paint of the next, so a cascade reads as steps. */
+const STAGE_GAP = 120;
 const SCORE_PARTICLE_DURATION = 680;
 const SCORE_PARTICLE_STAGGER = 55;
 const MUTED_KEY = 'darix.muted';
@@ -83,6 +94,14 @@ class DarixScene extends Phaser.Scene {
   private activePiece!: ActivePiece;
   private nextPiece!: ActivePiece;
   private boardGraphics!: Phaser.GameObjects.Graphics;
+  /** Draws the row-clear effects: the white flash that announces a completed row, then the popping squares. */
+  private fxGraphics!: Phaser.GameObjects.Graphics;
+  /** Draws the pulse over the blocks that grew, so merging is visible without any text. */
+  private mergeGraphics!: Phaser.GameObjects.Graphics;
+  /** True while a lock is playing out. Input and the fall timer are paused so nothing overlaps the animation. */
+  private animating = false;
+  /** Bumped whenever the game resets, so a running clear animation stops writing to a dead board. */
+  private animationToken = 0;
   private gameOverOverlay!: Phaser.GameObjects.Container;
   private gameOverText!: Phaser.GameObjects.Text;
   private splashOverlay!: Phaser.GameObjects.Container;
@@ -96,7 +115,6 @@ class DarixScene extends Phaser.Scene {
   private dropTimer = 0;
   private started = false;
   private gameOver = false;
-  private mergeCount = 0; // squares merged since last row clear
   private readonly cellSize = 32;
   private readonly boardOffsetX = 0;
   private readonly boardOffsetY = 0;
@@ -121,6 +139,8 @@ class DarixScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown-M', () => this.toggleMute());
 
     this.boardGraphics = this.add.graphics();
+    this.fxGraphics = this.add.graphics().setDepth(5);
+    this.mergeGraphics = this.add.graphics().setDepth(4);
     const overlay = this.add.container(0, 0).setDepth(10).setVisible(false);
     this.gameOverText = this.add.text(
       (BOARD_WIDTH * this.cellSize) / 2,
@@ -165,7 +185,19 @@ class DarixScene extends Phaser.Scene {
         fontSize: '16px',
         letterSpacing: 3,
       }).setOrigin(0.5),
-      this.add.text(centerX, centerY + 58, 'CLICK  /  TAP  /  SPACE TO START', {
+      this.add.text(
+        centerX,
+        centerY + 20,
+        'A FULL ROW CLEARS\nMATCHED BLOCKS SCORE DOUBLE',
+        {
+          align: 'center',
+          color: '#d4d4d8',
+          fontFamily: 'Arial Black, sans-serif',
+          fontSize: '12px',
+          lineSpacing: 8,
+        },
+      ).setOrigin(0.5),
+      this.add.text(centerX, centerY + 96, 'CLICK  /  TAP  /  SPACE TO START', {
         align: 'center',
         color: '#d4d4d8',
         fontFamily: 'monospace',
@@ -188,14 +220,13 @@ class DarixScene extends Phaser.Scene {
     this.updateScore();
     this.updateMultiplier();
     this.updateSpeed();
-    this.updateMergeHUD();
     this.updateRowProgress();
     this.draw();
     this.tweens.add({ targets: this.splashTitle, scale: 1, alpha: 1, duration: 500, ease: 'Back.Out' });
   }
 
   update(_: number, delta: number): void {
-    if (!this.started || this.gameOver) return;
+    if (!this.started || this.gameOver || this.animating) return;
     this.dropTimer += delta;
     if (this.dropTimer >= dropIntervalForSpeed(this.speed)) {
       this.dropTimer = 0;
@@ -231,7 +262,7 @@ class DarixScene extends Phaser.Scene {
   }
 
   move(direction: number): void {
-    if (!this.started || this.gameOver) return;
+    if (!this.started || this.gameOver || this.animating) return;
     const nextX = this.activePiece.x + direction;
     if (canPlace(this.board, this.activePiece, nextX, this.activePiece.y)) {
       this.activePiece.x = nextX;
@@ -240,7 +271,7 @@ class DarixScene extends Phaser.Scene {
   }
 
   dropOne(): void {
-    if (!this.started || this.gameOver) return;
+    if (!this.started || this.gameOver || this.animating) return;
     if (canPlace(this.board, this.activePiece, this.activePiece.x, this.activePiece.y + 1)) {
       this.activePiece.y += 1;
     } else {
@@ -250,7 +281,7 @@ class DarixScene extends Phaser.Scene {
   }
 
   hardDrop(): void {
-    if (!this.started || this.gameOver) return;
+    if (!this.started || this.gameOver || this.animating) return;
     while (canPlace(this.board, this.activePiece, this.activePiece.x, this.activePiece.y + 1)) {
       this.activePiece.y += 1;
     }
@@ -259,7 +290,7 @@ class DarixScene extends Phaser.Scene {
   }
 
   rotate(): void {
-    if (!this.started || this.gameOver) return;
+    if (!this.started || this.gameOver || this.animating) return;
     const rotated = { ...this.activePiece, blocks: rotateBlocks(this.activePiece.blocks) };
     if (canPlace(this.board, rotated)) {
       this.activePiece = { ...rotated, color: (rotated.color + 1) % COLORS.length };
@@ -268,6 +299,9 @@ class DarixScene extends Phaser.Scene {
   }
 
   restart(): void {
+    // Stop any clear animation that is still drawing on the old board.
+    this.animationToken += 1;
+    this.animating = false;
     this.board = createEmptyBoard();
     this.cancelScoreFlights();
     this.score = 0;
@@ -279,12 +313,13 @@ class DarixScene extends Phaser.Scene {
     this.dropTimer = 0;
     this.gameOverOverlay.setVisible(false);
     this.splashOverlay.setVisible(false);
+    this.fxGraphics.clear();
+    this.mergeGraphics.clear();
     this.nextPiece = this.createRandomPiece();
     this.spawnPiece();
     this.updateScore();
     this.updateMultiplier();
     this.updateSpeed();
-    this.updateMergeHUD();
     this.updateRowProgress();
     this.draw();
     this.playSfx('button');
@@ -342,12 +377,15 @@ class DarixScene extends Phaser.Scene {
   private lockActivePiece(): void {
     const locked = lockPiece(this.board, this.activePiece);
     const result = resolveLock(locked, this.activePiece.color);
-    this.board = result.board;
     this.multiplier = nextMultiplier(this.multiplier, result.hit);
-    const pointsPerSquare = POINTS_PER_SQUARE * this.multiplier;
-    const mergeBonus = result.mergedSquares * this.multiplier;
-    this.score += result.destroyed * pointsPerSquare + mergeBonus;
-    this.mergeCount += result.mergedSquares;
+    // A square in a cleared row scores double when it belongs to a block that has merged, which is
+    // the whole reason to bother matching colours. Every other square scores its single value.
+    const basePoints = POINTS_PER_SQUARE * this.multiplier;
+    // One entry per clear stage, so each popping square carries its own value to the score.
+    const scoredStages: ScoredCell[][] = result.stages.map((stage) =>
+      stage.cells.map((cell) => ({ ...cell, points: basePoints * (cell.merged ? 2 : 1) })),
+    );
+    this.score += scoredStages.flat().reduce((total, cell) => total + cell.points, 0);
     if (this.score > this.bestScore) {
       this.bestScore = this.score;
       saveBestScore(this.bestScore);
@@ -356,19 +394,166 @@ class DarixScene extends Phaser.Scene {
     const previousSpeed = this.speed;
     this.speed = nextSpeed(this.speed, result.hit);
     this.updateSpeed(Math.sign(this.speed - previousSpeed));
-    if (result.mergedSquares > 0) this.playSfx('bubble-pop');
-    this.playSfx(result.destroyed > 0 ? 'clear-combo' : 'button');
     if (this.speed > FAST_MUSIC_SPEED) this.playMusic('game-loop2');
     else if (this.speed <= CALM_MUSIC_SPEED) this.playMusic('game-loop1');
-    this.sweepRows(result.clearedRows);
-    this.sendScoreParticles(result.destroyedCells, pointsPerSquare);
-    this.updateMergeHUD();
+
+    if (result.mergedGroups.length > 0) {
+      this.playSfx('bubble-pop');
+      this.pulseMergedGroups(result.board, result.mergedGroups, this.animationToken);
+    }
+
+    if (result.stages.length === 0) {
+      this.board = result.board;
+      if (result.mergedGroups.length === 0) this.playSfx('button');
+      this.updateRowProgress();
+      this.spawnPiece();
+      return;
+    }
+
+    // The clear is played as a sequence: paint the row, hold, pop, then let the next stage read.
+    this.animating = true;
     this.updateRowProgress();
-    this.spawnPiece();
+    const token = this.animationToken;
+    this.playClearStage(token, result, 0, scoredStages, () => {
+      if (token !== this.animationToken) return;
+      this.animating = false;
+      this.dropTimer = 0;
+      this.board = result.board;
+      this.draw();
+      this.updateRowProgress();
+      this.spawnPiece();
+    });
   }
 
-  private sendScoreParticles(destroyedCells: Array<Point & { color: number }>, pointsPerSquare: number): void {
-    if (destroyedCells.length === 0) return;
+  /** Plays one row clear: the row shows its new colour, holds, then its squares pop out. */
+  private playClearStage(
+    token: number,
+    result: ResolveResult,
+    index: number,
+    scoredStages: ScoredCell[][],
+    done: () => void,
+  ): void {
+    if (token !== this.animationToken) return;
+    const stage = result.stages[index];
+    this.board = stage.painted;
+    this.draw();
+    this.playSfx('clear-combo');
+    const flash = { alpha: 0.55 };
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      duration: PAINT_HOLD,
+      onUpdate: () => this.drawFlash(stage.cells, token, flash.alpha),
+      onComplete: () => {
+        this.fxGraphics.clear();
+        this.popClearStage(token, stage, scoredStages[index] ?? [], () => {
+          if (index + 1 < result.stages.length) {
+            this.time.delayedCall(STAGE_GAP, () =>
+              this.playClearStage(token, result, index + 1, scoredStages, done),
+            );
+            return;
+          }
+          done();
+        });
+      },
+    });
+  }
+
+  /** Removes the cleared squares from the drawn board and shrinks them away. The whole of any block
+   *  the row reached is in `stage.cells`, so that is exactly what leaves the board. */
+  private popClearStage(token: number, stage: ClearStage, scored: ScoredCell[], done: () => void): void {
+    if (token !== this.animationToken) return;
+    const popped = cloneBoard(stage.painted);
+    for (const cell of stage.cells) popped[cell.y][cell.x] = null;
+    this.board = popped;
+    this.draw();
+    this.sendScoreParticles(scored);
+    const pop = { scale: 1 };
+    this.tweens.add({
+      targets: pop,
+      scale: 0,
+      duration: POP_DURATION,
+      ease: 'Back.In',
+      onUpdate: () => this.drawPopping(stage.cells, token, pop.scale),
+      onComplete: () => {
+        this.fxGraphics.clear();
+        done();
+      },
+    });
+  }
+
+  /** White wash over the given squares, fading as `alpha` drops. An expired token means the game
+   *  restarted underneath this tween, so the effect must stop drawing on the new board. */
+  private drawFlash(cells: Point[], token: number, alpha: number): void {
+    this.fxGraphics.clear();
+    if (token !== this.animationToken || alpha <= 0) return;
+    this.fxGraphics.fillStyle(0xffffff, alpha);
+    for (const cell of cells) {
+      this.fxGraphics.fillRect(
+        cell.x * this.cellSize + SHAPE_INSET,
+        cell.y * this.cellSize + SHAPE_INSET,
+        this.cellSize - SHAPE_INSET * 2,
+        this.cellSize - SHAPE_INSET * 2,
+      );
+    }
+  }
+
+  /** The cleared squares shrinking out of the board. */
+  private drawPopping(
+    cells: Array<Point & { color: number }>,
+    token: number,
+    scale: number,
+  ): void {
+    this.fxGraphics.clear();
+    if (token !== this.animationToken || scale <= 0) return;
+    const size = this.cellSize * scale;
+    const inset = (this.cellSize - size) / 2;
+    for (const cell of cells) {
+      this.fxGraphics.fillStyle(COLORS[cell.color % COLORS.length], 1);
+      this.fxGraphics.fillRoundedRect(
+        cell.x * this.cellSize + inset,
+        cell.y * this.cellSize + inset,
+        size,
+        size,
+        CORNER_RADIUS,
+      );
+    }
+  }
+
+  /** Flashes the squares of every block that grew, so a merge is visible on the board. */
+  private pulseMergedGroups(board: Board, groupIds: number[], token: number): void {
+    const cells: Point[] = [];
+    for (let y = 0; y < BOARD_HEIGHT; y += 1) {
+      for (let x = 0; x < BOARD_WIDTH; x += 1) {
+        const cell = board[y][x];
+        if (cell?.group !== undefined && groupIds.includes(cell.group)) cells.push({ x, y });
+      }
+    }
+    if (cells.length === 0) return;
+    const flash = { alpha: 0.8 };
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      duration: 420,
+      onUpdate: () => {
+        this.mergeGraphics.clear();
+        if (token !== this.animationToken || flash.alpha <= 0) return;
+        this.mergeGraphics.fillStyle(0xffffff, flash.alpha * 0.5);
+        for (const cell of cells) {
+          this.mergeGraphics.fillRect(
+            cell.x * this.cellSize + SHAPE_INSET,
+            cell.y * this.cellSize + SHAPE_INSET,
+            this.cellSize - SHAPE_INSET * 2,
+            this.cellSize - SHAPE_INSET * 2,
+          );
+        }
+      },
+      onComplete: () => this.mergeGraphics.clear(),
+    });
+  }
+
+  private sendScoreParticles(cells: ScoredCell[]): void {
+    if (cells.length === 0) return;
 
     const scoreElement = document.querySelector<HTMLElement>('#score');
     const canvasBounds = this.game.canvas.getBoundingClientRect();
@@ -382,7 +567,8 @@ class DarixScene extends Phaser.Scene {
     const targetX = scoreBounds.left + scoreBounds.width / 2;
     const targetY = scoreBounds.top + scoreBounds.height / 2;
 
-    destroyedCells.forEach((cell, index) => {
+    cells.forEach((cell, index) => {
+      const points = cell.points;
       const particle = document.createElement('span');
       particle.className = 'score-flight-particle';
       particle.style.left = `${canvasBounds.left + ((cell.x + 0.5) / BOARD_WIDTH) * canvasBounds.width}px`;
@@ -415,7 +601,7 @@ class DarixScene extends Phaser.Scene {
       animation.onfinish = () => {
         this.scoreFlights = this.scoreFlights.filter((activeFlight) => activeFlight !== flight);
         particle.remove();
-        this.displayedScore = Math.min(this.score, this.displayedScore + pointsPerSquare);
+        this.displayedScore = Math.min(this.score, this.displayedScore + points);
         this.updateScore();
         this.pulseScore();
       };
@@ -461,25 +647,6 @@ class DarixScene extends Phaser.Scene {
     button.setAttribute('aria-label', this.muted ? 'Unmute sound' : 'Mute sound');
   }
 
-  /** Sweeps the new color across each completed row so the clear is easy to follow. */
-  private sweepRows(rows: ClearedRow[]): void {
-    for (const { y, color } of rows) {
-      const width = BOARD_WIDTH * this.cellSize;
-      const bar = this.add.rectangle(0, y * this.cellSize + this.cellSize / 2, width, this.cellSize, COLORS[color % COLORS.length], 0.9)
-        .setOrigin(0, 0.5)
-        .setDepth(4)
-        .setScale(0, 1)
-        .setStrokeStyle(2, 0xffffff, 0.9);
-      this.tweens.chain({
-        targets: bar,
-        tweens: [
-          { scaleX: 1, duration: 180, ease: 'Cubic.Out' },
-          { alpha: 0, scaleY: 1.6, duration: 320, ease: 'Quad.In', onComplete: () => bar.destroy() },
-        ],
-      });
-    }
-  }
-
   private cancelScoreFlights(): void {
     for (const flight of this.scoreFlights) {
       flight.animation.cancel();
@@ -511,7 +678,7 @@ class DarixScene extends Phaser.Scene {
     // A piece that has not merged is separate squares, never one shape. The white edge is painted
     // under the fills so it follows the outside of each square instead of ruling through it.
     const separate = () => false;
-    if (!this.gameOver) {
+    if (!this.gameOver && !this.animating) {
       const piece = this.activePiece;
       this.boardGraphics.fillStyle(0xffffff, 0.95);
       for (const block of piece.blocks) {
@@ -617,12 +784,6 @@ class DarixScene extends Phaser.Scene {
       void multiplierElement.offsetWidth;
       multiplierElement.classList.add('multiplier-pop');
     }
-  }
-
-  private updateMergeHUD(): void {
-    const element = document.querySelector<HTMLElement>('#merge-count');
-    if (!element) return;
-    element.textContent = String(this.mergeCount);
   }
 
   /** Shows how close the nearest-to-complete row is, since a row goes when it is full. */

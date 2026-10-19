@@ -15,8 +15,9 @@ On a phone, use your browser's "Install app" or "Add to Home screen" to get it a
 - Every piece is one colour. Rotating it cycles to the next colour, so you choose what it matches.
 - Squares of the same colour that touch **merge** into one solid block. A piece that has never merged is still separate squares; the block it becomes is solid.
 - Any **full row** clears, whatever colours are in it, and sweeps away in the colour of the block that completed it. Blocks above fall as rigid units, and a fall that fills another row completes that row too.
-- Merged squares score a bonus on top of the per-square points.
-- Consecutive clears build your multiplier. Hits speed the game up, misses slow it down.
+- A row takes **whole blocks** with it: any block with a square in the cleared row goes entirely, the part sticking above the line too. Big and satisfying, and the reason not to park a giant blob across a row you are about to close.
+- When a row clears, every square it takes scores 10 × multiplier, and a square that belongs to a **merged block scores double** (20 × multiplier). Building big same-colour blocks is what makes a clear worth a lot; a full row of unmatched squares is the cheapest possible clear.
+- Consecutive clears build your multiplier. Every clear speeds the game up, and nothing slows it back down — the speed only ever climbs.
 
 ## Controls
 

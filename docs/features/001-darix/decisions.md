@@ -177,3 +177,23 @@ The completing block's colour is the row's colour: the whole row is washed in it
 ## Full is full: cascades clear · 2026-10-19
 
 Replaces "Only new connections pop in a chain" / the no-re-check decision, which belonged to the groups-of-4 model. The board settles until nothing is full, so a fall that fills a hole completes that row too. Also considered: only the row the lock completed, which left a full row sitting on the board looking like a bug.
+
+## A merged square in a cleared row scores double · 2026-10-19
+
+Replaces "Scoring: per-square + merge bonus". Feedback: colour matching looked like it did nothing. Merging now pays off inside the clear it feeds — each cleared square scores 10 × multiplier, and a square belonging to a merged block scores double that. Merging on its own scores nothing, so the merge counter and its per-lock bonus are gone. Also considered: a bigger merge making the whole merged blob detonate when a row clears through it (a bigger payoff, but one clear can empty the board), and keeping the flat per-merge bonus (it was invisible and never felt like a reason to match).
+
+## A clear is painted, held, then popped · 2026-10-19
+
+Replaces the coloured sweep bar. Feedback: the clear was unreadable — the row was gone from the board before anything was shown. The completed row is now drawn in its clearing colour and holds ~380 ms, then its squares shrink away, then the cascade stage (if any) repeats the same beats. Input and the fall timer pause while this plays.
+
+## The merge shows as a pulse, not a counter · 2026-10-19
+
+The sidebar's "Merged" number was dropped: nobody could tell what it counted. Blocks that grew during a lock flash white for a moment instead. The splash screen states the two rules that matter: a full row clears, matched blocks score double.
+
+## A row takes whole blocks with it · 2026-10-19
+
+On row completion the row is painted in the final colour (say red), holds, and pops — and every block with a square in that row goes entirely, the part sticking above the line with it. This is the "Merged pieces in a popping row pop with it" intent from the merge pass, finally in code; the old code removed only the ten squares of the row itself. Measured with a clear-hungry AI over 6 games: a clear takes ~24 squares where the rows themselves are ~11, so roughly 55% of a clear comes from blocks caught in it, biggest single pop 56 squares. That is the swing this rule buys — huge clears, and a reason not to park a blob across a row you are about to close. Also considered: the painted colour spreading through every connected same-colour square (a detonation that can empty a region in one lock), and row squares only.
+
+## The speed brake is off · 2026-10-19
+
+A lock that clears nothing no longer slows the fall down (was −0.07×), so after the first clear the speed only ever climbs. The rest of the curve is untouched: 700 ms at ×1, +0.1× per clear shrinking to +0.05× at ×5, floor 120 ms. Also considered: a faster base interval and a bigger hit bonus, parked because the whole-block clear already changed how much is happening on screen.

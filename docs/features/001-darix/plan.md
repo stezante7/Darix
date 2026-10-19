@@ -39,13 +39,13 @@ flowchart LR
 - [ ] Pieces keep their visual shape (not solid rectangles)
 - [ ] Any same-color contact on landing merges pieces into one solid block (combined outline)
 - [ ] Full row of same color → that row pops
-- [ ] Merged pieces caught in a popping row are popped with it
+- [x] Merged pieces caught in a popping row are popped with it (whole block, above the line too)
 - [ ] Squares above fall down as solid blocks (maintaining merged identity)
-- [ ] Scoring: per-square points + merge bonus (squares in merged × multiplier)
+- [x] Scoring: 10 × multiplier per cleared square, doubled for a square in a merged block
 - [ ] Fall speed ramps with score (same curve as now)
-- [ ] Preview shows piece shape, row-clear hint in HUD
-- [ ] Update README "How it plays" and tagline
-- [ ] Rewrite board tests for merge + row-clear rules
+- [ ] Preview shows piece shape, row-clear hint in HUD (row-progress card is in; the merge rule is on the splash)
+- [x] Update README "How it plays" and tagline
+- [x] Rewrite board tests for merge + row-clear rules
 
 ## Simplification pass (2026-10-18)
 
@@ -72,6 +72,10 @@ The merge pass replaces the groups-of-4 simplification after feedback that the g
 - The best score is stored locally in this browser; it does not sync across devices.
 
 ## Progress
+
+- 2026-10-19: Whole-block clears + no brake. A clear now takes the whole of any block reaching into the cleared row: painted in the row's colour, held, popped, then the cascade. Measured over 6 AI games — ~24 squares per clear, ~55% of them outside the row, biggest pop 56. A miss no longer takes speed off, so speed only climbs. 33 tests pass.
+
+- 2026-10-19: Clarity + payoff pass. A clear is now staged (row painted in its clearing colour → hold → squares pop → cascade), the sidebar's "Merged" counter is gone, merged blocks pulse when they grow, and merged squares score double in the clear they feed. 30 tests pass. Measured with a placement-heuristic AI over 3 games: ~166 locks and ~49 rows cleared per game, and 65% of cleared squares came from merged blocks, so the double is worth chasing without being the default.
 
 - 2026-10-20: Agreed the merge pass — pieces keep visual shape, merge on same-color contact, full row of same color pops, solid blocks fall. Replaces groups-of-4 which was too easy and not intuitive.
 - 2026-09-27: Agreed the core resolve-counter, row, and gravity behavior; implementation has not started.

@@ -93,7 +93,7 @@ body {
 .score-pot strong { color: var(--accent-yellow); }
 .multiplier-card strong { display: inline-block; color: var(--accent-cyan); }
 .speed-card strong { display: inline-block; color: var(--accent-purple); }
-.merge-row strong { display: inline-block; color: var(--accent-lime); }
+
 .speed-card strong.speed-up { animation: speed-up-flash 420ms ease-out; }
 .speed-card strong.speed-down { animation: speed-down-flash 420ms ease-out; }
 
@@ -266,7 +266,6 @@ body {
   .score-pot span { color: #d4d4d8; font-size: 0.7rem; }
   .score-pot strong { font-size: 1.05rem; }
   .multiplier-card strong, .speed-card strong { font-size: 0.75rem; }
-  .merge-row strong { font-size: 0.75rem; }
   .row-progress-bar { width: 16px; height: 6px; }
   .sidebar-stats { gap: 0.05rem; }
   .next-piece {

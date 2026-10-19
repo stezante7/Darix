@@ -96,7 +96,7 @@ const DIRECTIONS: Point[] = [
  * never shows same-color squares that are not one block.
  * Returns how many squares changed block, which is how much the player merged.
  */
-function mergeSameColor(board: Board): number {
+function mergeSameColor(board: Board, grew?: Set<number>): number {
   const seen = new Set<string>();
   let absorbed = 0;
 
@@ -132,7 +132,10 @@ function mergeSameColor(board: Board): number {
 
       for (const pt of run) {
         const cell = board[pt.y][pt.x]!;
-        if (cell.group !== owner) absorbed += 1;
+        if (cell.group !== owner) {
+          absorbed += 1;
+          grew?.add(owner);
+        }
         cell.group = owner;
         if (becameSolid) cell.merged = true;
       }
@@ -148,6 +151,21 @@ export interface ClearedRow {
   color: number;
 }
 
+/**
+ * One row clear, as a moment the player can watch: the full rows painted in the clearing colour,
+ * before any of them is removed or anything falls.
+ */
+export interface ClearStage {
+  rows: ClearedRow[];
+  /** Snapshot with the cleared rows painted. The row is still physically there. */
+  painted: Board;
+  /**
+   * Squares this stage removes, with the colour they were painted in. This is the whole of every
+   * block that had a square in a cleared row, not only the squares that sat in the row.
+   */
+  cells: DestroyedCell[];
+}
+
 function rowIsFull(board: Board, y: number): boolean {
   return board[y].every((cell) => cell !== null);
 }
@@ -161,11 +179,9 @@ function fullRowIndexes(board: Board): number[] {
   return rows;
 }
 
-/** Removes every full row. */
-function clearRows(board: Board, rowIndexes: number[]): void {
-  for (const y of rowIndexes) {
-    for (let x = 0; x < BOARD_WIDTH; x += 1) board[y][x] = null;
-  }
+/** Removes the squares a clear took. */
+function removeCells(board: Board, cells: DestroyedCell[]): void {
+  for (const cell of cells) board[cell.y][cell.x] = null;
 }
 
 /**
@@ -247,32 +263,102 @@ export function applyGravity(board: Board): Board {
   return settled;
 }
 
+export interface DestroyedCell extends Point {
+  color: number;
+  /** True when the square belonged to a block that had already merged. These score double. */
+  merged: boolean;
+}
+
 export interface ResolveResult {
   board: Board;
   /** Squares removed by row clears. */
   destroyed: number;
   /** Position and colour of destroyed squares. */
-  destroyedCells: Array<Point & { color: number }>;
+  destroyedCells: DestroyedCell[];
   /** Whether this lock cleared any rows. */
   hit: boolean;
-  /** Rows that were full and cleared. */
-  clearedRows: ClearedRow[];
+  /** The row clears this lock caused, in the order they happen. A cascade adds a stage per clear. */
+  stages: ClearStage[];
   /** Squares that joined another block, i.e. how much this lock merged. */
   mergedSquares: number;
+  /** Ids of the blocks that swallowed another block during this lock, so the merge can be shown. */
+  mergedGroups: number[];
+}
+
+/**
+ * The squares one clear takes: every square of the full rows, plus the rest of any block that had
+ * a square in one of them. A merged blob straddling a cleared row goes whole — the part above the
+ * line dies with the part inside it. Each doomed square is painted in the colour of the row that
+ * claimed it; the first row down claims its blocks, so a block caught between two clears in the
+ * same stage is not painted or scored twice.
+ */
+function collectClear(
+  board: Board,
+  rowIndexes: number[],
+  beforeFalls: Board,
+  lockColor: number,
+): { rows: ClearedRow[]; cells: DestroyedCell[] } {
+  const rows: ClearedRow[] = [];
+  const cells: DestroyedCell[] = [];
+  const taken = new Set<string>();
+  /** Block id → the colour of the first cleared row that square's block touches. */
+  const claimed = new Map<number, number>();
+
+  const take = (x: number, y: number, color: number) => {
+    const cell = board[y][x]!;
+    cell.color = color;
+    cells.push({ x, y, color, merged: cell.merged === true });
+    taken.add(key(x, y));
+  };
+
+  for (const y of rowIndexes) {
+    // The lock that filled the row is the completing block. For a row filled by a fall it is
+    // whichever block dropped into its hole. The whole row takes that colour as it goes.
+    const color = rowIsFull(beforeFalls, y) ? lockColor : completingColor(board, beforeFalls, y);
+    rows.push({ y, color });
+    for (let x = 0; x < BOARD_WIDTH; x += 1) {
+      const group = board[y][x]!.group;
+      if (group === undefined) {
+        take(x, y, color);
+        continue;
+      }
+      const claimedColor = claimed.get(group);
+      if (claimedColor === undefined) {
+        claimed.set(group, color);
+        take(x, y, color);
+      } else {
+        take(x, y, claimedColor);
+      }
+    }
+  }
+
+  // Everything else those blocks own, above the rows as well as below them.
+  for (let y = 0; y < BOARD_HEIGHT; y += 1) {
+    for (let x = 0; x < BOARD_WIDTH; x += 1) {
+      const group = board[y][x]?.group;
+      if (group === undefined || taken.has(key(x, y))) continue;
+      const claimedColor = claimed.get(group);
+      if (claimedColor === undefined) continue;
+      take(x, y, claimedColor);
+    }
+  }
+
+  return { rows, cells };
 }
 
 /**
  * Resolves a locked piece. `lockColor` is the colour of the piece that locked, which is what a
  * row it completed gets swept in.
  * 1. Merges same-color contact squares into one solid block.
- * 2. Clears every full row.
- * 3. Applies gravity so blocks settle, merging anything the falls leave touching, and clears again
+ * 2. Everything settles, so a piece rests before its row is measured.
+ * 3. Clears every full row, taking the whole of any block that reaches into it.
+ * 4. Applies gravity so blocks settle, merging anything the falls leave touching, and clears again
  *    — a fall that fills a row completes that row too.
  */
 /** Blocks fall and, since a fall can leave two blocks touching, the board merges again. */
-function settle(board: Board): Board {
+function settle(board: Board, grew?: Set<number>): Board {
   const settled = applyGravity(board);
-  mergeSameColor(settled);
+  mergeSameColor(settled, grew);
   return settled;
 }
 
@@ -280,40 +366,38 @@ export function resolveLock(board: Board, lockColor: number): ResolveResult {
   let resolved = cloneBoard(board);
 
   // Step 1: Merge same-color contacts.
-  let mergedSquares = mergeSameColor(resolved);
+  const grew = new Set<number>();
+  const mergedSquares = mergeSameColor(resolved, grew);
 
   // Step 2: everything settles, so a piece rests before its row is measured.
   let beforeFalls = cloneBoard(resolved);
-  resolved = settle(resolved);
+  resolved = settle(resolved, grew);
 
   // Step 3: a full row goes, whatever colours are in it. The blocks a clear leaves behind fall
   // into the gaps and can complete another row, so this repeats until nothing is full.
-  const clearedRows: ClearedRow[] = [];
-  const destroyedCells: Array<Point & { color: number }> = [];
+  const stages: ClearStage[] = [];
+  const destroyedCells: DestroyedCell[] = [];
   while (true) {
     const rowIndexes = fullRowIndexes(resolved);
     if (rowIndexes.length === 0) break;
 
-    for (const y of rowIndexes) {
-      // The lock that filled the row is the completing block. For a row filled by a fall it is
-      // whichever block dropped into its hole. The whole row takes that colour as it goes.
-      const color = rowIsFull(beforeFalls, y) ? lockColor : completingColor(resolved, beforeFalls, y);
-      clearedRows.push({ y, color });
-      for (let x = 0; x < BOARD_WIDTH; x += 1) destroyedCells.push({ x, y, color });
-    }
+    const { rows, cells } = collectClear(resolved, rowIndexes, beforeFalls, lockColor);
+    stages.push({ rows, painted: cloneBoard(resolved), cells });
+    destroyedCells.push(...cells);
 
-    clearRows(resolved, rowIndexes);
+    removeCells(resolved, cells);
     beforeFalls = cloneBoard(resolved);
-    resolved = settle(resolved);
+    resolved = settle(resolved, grew);
   }
 
   return {
     board: resolved,
     destroyed: destroyedCells.length,
     destroyedCells,
-    hit: clearedRows.length > 0,
-    clearedRows,
+    hit: stages.length > 0,
+    stages,
     mergedSquares,
+    mergedGroups: [...grew],
   };
 }
 
