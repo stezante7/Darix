@@ -5,7 +5,6 @@ export const PREVIEW_HEIGHT = 2;
 
 export interface PreviewCell extends Point {
   color: number;
-  resolve: number;
 }
 
 export function getPiecePreview(piece: ActivePiece): PreviewCell[] {
@@ -16,10 +15,9 @@ export function getPiecePreview(piece: ActivePiece): PreviewCell[] {
   const offsetX = Math.floor((PREVIEW_WIDTH - width) / 2);
   const offsetY = Math.floor((PREVIEW_HEIGHT - height) / 2);
 
-  return piece.blocks.map((block, index) => ({
+  return piece.blocks.map((block) => ({
     x: block.x - minX + offsetX,
     y: block.y - minY + offsetY,
-    color: piece.colors[index],
-    resolve: piece.resolves[index] ?? 1,
+    color: piece.color,
   }));
 }

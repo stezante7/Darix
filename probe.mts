@@ -1,0 +1,10 @@
+import { BOARD_WIDTH, createEmptyBoard, createPiece, lockPiece, resolveLock } from './src/game/board';
+const b = createEmptyBoard();
+for (let x = 0; x < BOARD_WIDTH; x++) if (x !== 7) b[19][x] = { color: 0 };
+for (const [x, y] of [[3,18],[4,18],[5,18],[5,17]] as Array<[number, number]>) b[y][x] = { color: 1 };
+for (const [x, y] of [[3,16],[4,16],[3,17],[4,17]] as Array<[number, number]>) b[y][x] = { color: 2, group: 7 };
+const p = Object.assign(createPiece(1, 1), { x: 6, y: 17 });
+const r = resolveLock(lockPiece(b, p), b, p.blocks.map((bl: any) => ({ x: p.x + bl.x, y: p.y + bl.y })));
+console.log('destroyed', r.destroyed, JSON.stringify(r.destroyedCells.map((c: any) => `${c.x},${c.y}c${c.color}`)));
+console.log('loosened', JSON.stringify(r.loosenedCells.map((c: any) => `${c.x},${c.y}c${c.color}`)));
+for (let y = 14; y <= 19; y++) console.log(y, r.board[y].map((c: any) => c === null ? '.' : (c.group !== undefined ? `G${c.color}` : `${c.color}`)).join(' '));

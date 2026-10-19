@@ -99,3 +99,31 @@ Darix is a PWA: a web manifest, an orange "D" icon on a dark rounded square (plu
 ## Gentler difficulty curve · 2026-09-27
 
 Feedback said the game got too hard too fast. A hit now adds +0.1× at 1×, shrinking to +0.05× at 5×; a miss takes off 0.07×. At a 50% hit rate, 2× takes about 86 pieces (was 20); at 60%, about 36 (was 13); below a 50% hit rate, speed stays near 1×. Multi-color pieces now start at 2× and reach at most 60% at 5×, and three colors start at 3.5×. This refines "Multi-color pieces as speed rises."
+
+## Drop per-square resolve numbers · 2026-10-18
+
+Players couldn't read the game: every square carried two facts (colour and a number 1-5) and the rule that consumed them (each *new* contact wears both by 1) was invisible on the board. Squares no longer have resolve values; colour is the only state on a square.
+
+## Groups of 4 or more pop · 2026-10-18
+
+With numbers gone, a pop needs its own trigger. When a piece lands, flood-fill each connected same-colour group touching it; a group of 4+ squares pops and scores, a smaller group stays on the board as groundwork. The threshold is fixed at 4 and never changes, so the rule is one sentence. Also considered: any contact pops instantly (simplest, but matches become automatic and there is nothing to build toward), and chain pops for bonus (keeps multi-step play but still needs a hint for which contacts will fire).
+
+## Keep full-row recolour · 2026-10-18
+
+A completed row still turns the landing piece's colour and resolves as part of the colour rules. Kept despite the simplification pass because it gives big clears their payoff. Also considered: remove it entirely, and make rows pop outright like classic Tetris.
+
+## One colour per piece again · 2026-10-18
+
+Multi-colour pieces go away at all speeds. Every piece is one solid colour and rotation cycles it, so colour choice is the whole decision and the board reads cleanly without numbers. Speed and difficulty still ramp, but through fall rate only. This replaces the speed-based colour mixing in "Multi-color pieces as speed rises".
+
+## The landing piece's own squares never count towards the four · 2026-10-18
+
+A landing piece can complete a group but never clear itself: its squares connect the group and pop with it, but the count of four must come from squares already on the board. Without this, a whole O piece landing anywhere would pop itself, and one bad drop onto a uniform floor could wipe the board.
+
+## A completed row paints only the touched run · 2026-10-18
+
+Completing a row paints the same-colour run the landing piece touched with the landing colour — not the whole row — and that run then pops as one bigger group. A row already all in the landing colour gains nothing and is not repainted. This replaces "Keep full-row recolour": painting all ten squares let a single lock pop the landing piece together with the whole painted row and melt large monochrome areas.
+
+## Only new connections pop in a chain · 2026-10-18
+
+After a pop, falling squares pop again only when a fall brings a square next to its own colour for the first time and the merged group reaches four counted squares. An intact piece that merely falls does not pop itself, so one lock cannot cascade through the whole board. Also considered: re-seeding every group around the event (one probe lock destroyed 19 squares and emptied the board), and not re-checking after falls at all (loses the chain thrill).

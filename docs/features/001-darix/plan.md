@@ -1,13 +1,13 @@
 # Darix
 
-Darix is a web-first Phaser 4 falling-block game where same-color contacts and full rows wear down per-square resolve counters, with a tighter game layout and score-driven difficulty.
+Darix is a web-first Phaser 4 falling-block game where same-color groups of 4+ pop and full rows recolor to the landing piece's color, with a tighter game layout and score-driven difficulty. Per-square resolve numbers were dropped on 2026-10-18 to make the rules readable at a glance.
 
 ```mermaid
 flowchart LR
   Splash[Color title splash + start input ✅] --> Board[Board + falling piece ✅]
-  Board --> Rules[Contact + row rules ✅]
+  Board --> Rules[Group-pop + row rules 🚧]
   Rules --> Score[Score + multiplier ✅]
-  Score --> Speed[Score-driven speed ✅]
+  Score --> Speed[Fall-rate speed ✅]
   Speed --> Board
   Score --> Flight[Points fly to score ✅]
   Flight --> Hud[Right sidebar: title, stats + next piece ✅]
@@ -18,8 +18,7 @@ flowchart LR
 
 - [x] Phaser 4 web game shell and playable board
 - [x] Falling pieces, controls, accent colors, and resolve numbers
-- [x] Same-color contact and full-row resolve rules
-- [x] Destroyed-square scoring, gravity, and Android-browser-friendly layout
+- [x] Same-color contact and full-row resolve rules- [x] Destroyed-square scoring, gravity, and Android-browser-friendly layout
 - [x] Remove bottom buttons; keep keyboard play and use canvas gestures on touch screens
 - [x] Center the playfield, prevent page scrolling, and switch to a neutral grey background
 - [x] Show game over with a restart prompt
@@ -33,6 +32,17 @@ flowchart LR
 - [x] Put title, score, multiplier, and exact next piece in a right sidebar beside the playfield
 - [x] Let the playfield use the available height and remove the bottom instruction text
 - [x] Stack the compact sidebar above the playfield on narrow screens
+
+## Simplification pass (2026-10-18)
+
+- [x] Remove `resolve` from cells, pieces, preview and rendering
+- [x] Replace contact-wear with flood-fill group pops (threshold 4, landing piece doesn't count)
+- [x] Row completion paints the touched run; pops as one group
+- [x] Drop multi-colour pieces; rotation cycles one colour only
+- [x] Chains pop only on new connections made by a fall
+- [x] Update README "How it plays" and the tagline
+
+Scoring keeps 10 points per popped square and the existing multiplier and hit/miss speed curve; with pops rarer but bigger than the old trickle, the curve needs a playtest before changing numbers.
 
 ## Out of scope for the first pass
 
@@ -72,3 +82,5 @@ flowchart LR
 - 2026-09-27: Phones now show a condensed top bar (score + multiplier, title, next piece) with the board full-width below.
 - 2026-09-27: Completed rows now recolor to the landing piece's color and resolve as one big match, with a row sweep effect; added sounds, speed-based music, and a remembered mute toggle.
 - 2026-09-27: Phone top bar now matches the board width. Added multi-color pieces that appear more often as speed rises, with per-square colors in rotation, rows, preview and drawing.
+- 2026-10-18: Agreed the simplification pass after player feedback that the colours-and-numbers rules were hard to grasp: no resolve numbers, groups of 4+ pop, row recolour stays, one colour per piece.
+- 2026-10-18: Implemented the new pop rules, row-run painting, and new-connection chains; rewrote the board tests around verified behaviour (21 passing) and updated the README, HUD tagline and preview.

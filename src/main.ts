@@ -15,7 +15,7 @@ import {
   resolveLock,
   rotateBlocks,
 } from './game/board';
-import { pieceColors } from './game/colors';
+import { pieceColor } from './game/colors';
 import { MIN_SPEED, dropIntervalForSpeed, nextSpeed } from './game/speed';
 import { nextMultiplier } from './game/multiplier';
 import { getPiecePreview } from './game/preview';
@@ -84,7 +84,6 @@ class DarixScene extends Phaser.Scene {
   private gameOverText!: Phaser.GameObjects.Text;
   private splashOverlay!: Phaser.GameObjects.Container;
   private splashTitle!: Phaser.GameObjects.Container;
-  private cells: Phaser.GameObjects.Text[] = [];
   private score = 0;
   private displayedScore = 0;
   private multiplier = 1;
@@ -155,7 +154,7 @@ class DarixScene extends Phaser.Scene {
     this.splashOverlay = this.add.container(0, 0, [
       this.add.rectangle(centerX, centerY, BOARD_WIDTH * this.cellSize, BOARD_HEIGHT * this.cellSize, 0x111827, 0.68),
       this.splashTitle,
-      this.add.text(centerX, centerY - 20, 'RESOLVE THE GRID', {
+      this.add.text(centerX, centerY - 20, 'MATCH FOUR OF A COLOUR', {
         align: 'center',
         color: '#22d3ee',
         fontFamily: 'Arial Black, sans-serif',
@@ -257,7 +256,7 @@ class DarixScene extends Phaser.Scene {
     if (!this.started || this.gameOver) return;
     const rotated = { ...this.activePiece, blocks: rotateBlocks(this.activePiece.blocks) };
     if (canPlace(this.board, rotated)) {
-      this.activePiece = { ...rotated, colors: rotated.colors.map((color) => (color + 1) % COLORS.length) };
+      this.activePiece = { ...rotated, color: (rotated.color + 1) % COLORS.length };
       this.draw();
     }
   }
@@ -301,7 +300,7 @@ class DarixScene extends Phaser.Scene {
 
   private createRandomPiece(): ActivePiece {
     const shape = Phaser.Math.Between(0, SHAPES.length - 1);
-    return createPiece(shape, pieceColors(this.speed, SHAPES[shape].length, COLORS.length));
+    return createPiece(shape, pieceColor(COLORS.length));
   }
 
   private updateNextPiecePreview(): void {
@@ -315,7 +314,6 @@ class DarixScene extends Phaser.Scene {
       tile.style.gridColumn = String(cell.x + 1);
       tile.style.gridRow = String(cell.y + 1);
       tile.style.backgroundColor = `#${COLORS[cell.color % COLORS.length].toString(16).padStart(6, '0')}`;
-      tile.textContent = String(cell.resolve);
       tile.setAttribute('aria-hidden', 'true');
       preview.append(tile);
     }
@@ -445,9 +443,12 @@ class DarixScene extends Phaser.Scene {
 
   /** Sweeps the new color across each completed row so the recolor is easy to follow. */
   private sweepRows(rows: RecoloredRow[]): void {
-    const width = BOARD_WIDTH * this.cellSize;
-    for (const { y, color } of rows) {
-      const bar = this.add.rectangle(0, y * this.cellSize + this.cellSize / 2, width, this.cellSize, COLORS[color % COLORS.length], 0.9)
+    for (const { y, color, cells } of rows) {
+      if (cells.length === 0) continue;
+      const first = Math.min(...cells.map((cell) => cell.x));
+      const last = Math.max(...cells.map((cell) => cell.x));
+      const width = (last - first + 1) * this.cellSize;
+      const bar = this.add.rectangle(first * this.cellSize, y * this.cellSize + this.cellSize / 2, width, this.cellSize, COLORS[color % COLORS.length], 0.9)
         .setOrigin(0, 0.5)
         .setDepth(4)
         .setScale(0, 1)
@@ -514,8 +515,6 @@ class DarixScene extends Phaser.Scene {
   }
 
   private draw(): void {
-    for (const cell of this.cells) cell.destroy();
-    this.cells = [];
     this.boardGraphics.clear();
     this.boardGraphics.fillStyle(BACKGROUND, 1);
     this.boardGraphics.fillRect(this.boardOffsetX, this.boardOffsetY, BOARD_WIDTH * this.cellSize, BOARD_HEIGHT * this.cellSize);
@@ -533,15 +532,15 @@ class DarixScene extends Phaser.Scene {
       for (let x = 0; x < BOARD_WIDTH; x += 1) {
         const cell = this.board[y][x];
         if (!cell) continue;
-        this.drawCell(x, y, cell.color, cell.resolve, (dx, dy) =>
+        this.drawCell(x, y, cell.color, (dx, dy) =>
           cell.group !== undefined && this.board[y + dy]?.[x + dx]?.group === cell.group);
       }
     }
 
     if (!this.gameOver) {
       const piece = this.activePiece;
-      for (const [index, block] of piece.blocks.entries()) {
-        this.drawCell(piece.x + block.x, piece.y + block.y, piece.colors[index], piece.resolves[index] ?? 1, (dx, dy) =>
+      for (const block of piece.blocks) {
+        this.drawCell(piece.x + block.x, piece.y + block.y, piece.color, (dx, dy) =>
           piece.blocks.some((other) => other.x === block.x + dx && other.y === block.y + dy));
       }
     }
@@ -552,7 +551,6 @@ class DarixScene extends Phaser.Scene {
     x: number,
     y: number,
     colorIndex: number,
-    resolve: number | string,
     linked: (dx: number, dy: number) => boolean,
   ): void {
     const size = this.cellSize;
@@ -579,13 +577,6 @@ class DarixScene extends Phaser.Scene {
         this.boardGraphics.fillRect(dx < 0 ? left : left + size - inset, dy < 0 ? top : top + size - inset, inset, inset);
       }
     }
-    const text = this.add.text(
-      x * this.cellSize + this.cellSize / 2,
-      y * this.cellSize + this.cellSize / 2,
-      String(resolve),
-      { color: '#111827', fontFamily: 'Arial Black, sans-serif', fontSize: '16px' },
-    ).setOrigin(0.5);
-    this.cells.push(text);
   }
 
   private updateScore(): void {
