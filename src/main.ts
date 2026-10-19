@@ -508,16 +508,17 @@ class DarixScene extends Phaser.Scene {
       }
     }
 
-    // The falling piece gets a white edge. It is painted as one silhouette under its fills, so the
-    // border follows the outside of the shape instead of ruling every square inside it.
+    // A piece that has not merged is separate squares, never one shape. The white edge is painted
+    // under the fills so it follows the outside of each square instead of ruling through it.
+    const separate = () => false;
     if (!this.gameOver) {
       const piece = this.activePiece;
       this.boardGraphics.fillStyle(0xffffff, 0.95);
       for (const block of piece.blocks) {
-        this.cellOutline(piece.x + block.x, piece.y + block.y, this.pieceLink(piece, block));
+        this.cellOutline(piece.x + block.x, piece.y + block.y, separate);
       }
       for (const block of piece.blocks) {
-        this.fillCell(piece.x + block.x, piece.y + block.y, piece.color, this.pieceLink(piece, block));
+        this.fillCell(piece.x + block.x, piece.y + block.y, piece.color, separate);
       }
     }
 
@@ -525,15 +526,12 @@ class DarixScene extends Phaser.Scene {
       for (let x = 0; x < BOARD_WIDTH; x += 1) {
         const cell = this.board[y][x];
         if (!cell) continue;
+        // Only a merged block closes the gaps between its squares and reads as one solid form.
+        const solid = cell.merged === true;
         this.fillCell(x, y, cell.color, (dx, dy) =>
-          cell.group !== undefined && this.board[y + dy]?.[x + dx]?.group === cell.group);
+          solid && this.board[y + dy]?.[x + dx]?.group === cell.group);
       }
     }
-  }
-
-  /** Whether a block of the falling piece has a neighbour of the same piece at that offset. */
-  private pieceLink(piece: ActivePiece, block: Point): (dx: number, dy: number) => boolean {
-    return (dx, dy) => piece.blocks.some((other) => other.x === block.x + dx && other.y === block.y + dy);
   }
 
   /** Paints one square of a shape. Squares that belong together lose the gutter between them,

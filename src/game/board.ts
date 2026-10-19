@@ -4,8 +4,11 @@ export const POINTS_PER_SQUARE = 10;
 
 export interface Cell {
   color: number;
-  /** Id of the merged piece this square belongs to; absent once the square is loose. */
+  /** Id of the block this square belongs to; absent once the square is loose. */
   group?: number;
+  /** True once the block has swallowed another block. A merged block is one solid shape; a
+   *  piece that has never merged still reads as separate squares. */
+  merged?: boolean;
 }
 
 export type Board = Array<Array<Cell | null>>;
@@ -124,11 +127,14 @@ function mergeSameColor(board: Board): number {
       );
       // A run that never belonged to a block just gets labelled; nothing was merged away.
       if (owner === Infinity) continue;
+      // Several blocks in one run means they have just become one, which is what makes it solid.
+      const becameSolid = run.some((pt) => board[pt.y][pt.x]!.group !== owner);
 
       for (const pt of run) {
         const cell = board[pt.y][pt.x]!;
         if (cell.group !== owner) absorbed += 1;
         cell.group = owner;
+        if (becameSolid) cell.merged = true;
       }
     }
   }

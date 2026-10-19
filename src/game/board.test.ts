@@ -149,6 +149,21 @@ describe('merge on same-color contact', () => {
     expect(strayPairs(result.board)).toBe(0);
   });
 
+  it('makes only a merged block solid', () => {
+    const board = createEmptyBoard();
+    setCells(board, [[2, 18, 1]]);
+    const piece = createPiece(0, 1);
+    piece.x = 3;
+    piece.y = 18;
+    const merged = setPiece(board, piece);
+    expect(merged.board[19][2]!.merged).toBe(true);
+    expect(merged.board[19][3]!.merged).toBe(true);
+
+    // A piece that lands without touching its own colour stays separate squares.
+    const alone = setPiece(createEmptyBoard(), createPiece(0, 1));
+    expect(alone.board[19][3]!.merged).toBeUndefined();
+  });
+
   it('does not merge when there is no same-color contact', () => {
     const board = createEmptyBoard();
     setCells(board, [[8, 18, 1]]);
