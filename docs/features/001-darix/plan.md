@@ -1,11 +1,11 @@
 # Darix
 
-Darix is a web-first Phaser 4 falling-block game where same-color groups of 4+ pop and full rows recolor to the landing piece's color, with a tighter game layout and score-driven difficulty. Per-square resolve numbers were dropped on 2026-10-18 to make the rules readable at a glance.
+Darix is a web-first Phaser 4 falling-block game where pieces merge on color contact and full rows of the same color pop, with solid blocks falling down as intact units. Pieces keep their visual shape and merge into solid combined outlines.
 
 ```mermaid
 flowchart LR
   Splash[Color title splash + start input ✅] --> Board[Board + falling piece ✅]
-  Board --> Rules[Group-pop + row rules 🚧]
+  Board --> Rules[Row-clear + merge 🚧]
   Rules --> Score[Score + multiplier ✅]
   Score --> Speed[Fall-rate speed ✅]
   Speed --> Board
@@ -18,7 +18,8 @@ flowchart LR
 
 - [x] Phaser 4 web game shell and playable board
 - [x] Falling pieces, controls, accent colors, and resolve numbers
-- [x] Same-color contact and full-row resolve rules- [x] Destroyed-square scoring, gravity, and Android-browser-friendly layout
+- [x] Same-color contact and full-row resolve rules
+- [x] Destroyed-square scoring, gravity, and Android-browser-friendly layout
 - [x] Remove bottom buttons; keep keyboard play and use canvas gestures on touch screens
 - [x] Center the playfield, prevent page scrolling, and switch to a neutral grey background
 - [x] Show game over with a restart prompt
@@ -33,6 +34,19 @@ flowchart LR
 - [x] Let the playfield use the available height and remove the bottom instruction text
 - [x] Stack the compact sidebar above the playfield on narrow screens
 
+## Merge pass (replacement for groups-of-4)
+
+- [ ] Pieces keep their visual shape (not solid rectangles)
+- [ ] Any same-color contact on landing merges pieces into one solid block (combined outline)
+- [ ] Full row of same color → that row pops
+- [ ] Merged pieces caught in a popping row are popped with it
+- [ ] Squares above fall down as solid blocks (maintaining merged identity)
+- [ ] Scoring: per-square points + merge bonus (squares in merged × multiplier)
+- [ ] Fall speed ramps with score (same curve as now)
+- [ ] Preview shows piece shape, row-clear hint in HUD
+- [ ] Update README "How it plays" and tagline
+- [ ] Rewrite board tests for merge + row-clear rules
+
 ## Simplification pass (2026-10-18)
 
 - [x] Remove `resolve` from cells, pieces, preview and rendering
@@ -43,6 +57,8 @@ flowchart LR
 - [x] Update README "How it plays" and the tagline
 
 Scoring keeps 10 points per popped square and the existing multiplier and hit/miss speed curve; with pops rarer but bigger than the old trickle, the curve needs a playtest before changing numbers.
+
+The merge pass replaces the groups-of-4 simplification after feedback that the game was too easy. Groups-of-4 was not intuitive and clears were too frequent.
 
 ## Out of scope for the first pass
 
@@ -57,6 +73,7 @@ Scoring keeps 10 points per popped square and the existing multiplier and hit/mi
 
 ## Progress
 
+- 2026-10-20: Agreed the merge pass — pieces keep visual shape, merge on same-color contact, full row of same color pops, solid blocks fall. Replaces groups-of-4 which was too easy and not intuitive.
 - 2026-09-27: Agreed the core resolve-counter, row, and gravity behavior; implementation has not started.
 - 2026-09-27: Built the Phaser 4 web prototype with keyboard/touch controls, tested board rules, scoring, and gravity.
 - 2026-09-27: Agreed on this follow-up pass: remove the bottom button row, retain touch play with canvas gestures, improve the centered no-scroll layout, add a visible game-over state, ramp speed with score, and persist the best score locally.

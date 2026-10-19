@@ -127,3 +127,39 @@ Completing a row paints the same-colour run the landing piece touched with the l
 ## Only new connections pop in a chain · 2026-10-18
 
 After a pop, falling squares pop again only when a fall brings a square next to its own colour for the first time and the merged group reaches four counted squares. An intact piece that merely falls does not pop itself, so one lock cannot cascade through the whole board. Also considered: re-seeding every group around the event (one probe lock destroyed 19 squares and emptied the board), and not re-checking after falls at all (loses the chain thrill).
+
+## Pieces keep their visual shape, not solid blocks · 2026-10-20
+
+Every piece draws with its actual shape (the individual blocks visible). Solid rectangles are boring and hide the piece identity. Also considered: solid blocks for everything (simplest), or shape-only for multi-color pieces.
+
+## Merge on any same-color contact · 2026-10-20
+
+When a landing piece touches same-color squares (even one square), those squares merge with the piece into one solid block. The merged block takes the combined outline shape of all involved squares. Also considered: only merge when forming a group of 2+, and only merge after multiple contacts.
+
+## Full row of same color pops · 2026-10-20
+
+A row is cleared only when all 10 squares are the same color. This is the sole clear condition. Also considered: any full row regardless of color (classic Tetris, easier), groups of 4+ (too easy, not intuitive), and any same-color group of 3+ (still abstract).
+
+## Merged pieces in a popping row pop with it · 2026-10-20
+
+When a row pops, any merged piece that has squares in that row is also popped — its squares are removed along with the rest of the row. The merged piece does not break apart; it disappears entirely as part of the clear. Also considered: break merged pieces into loose squares (adds shatter logic and complexity), and keep merged pieces intact but clear only the non-merged squares (inconsistent).
+
+## Squares above fall as solid blocks · 2026-10-20
+
+After a row clears, the squares above drop down into the empty space as solid blocks, maintaining their merged identity (group). Loose squares fall on their own; merged pieces fall as rigid units. Also considered: every square falls independently (loses the solid-block feel), or squares stay in place (no gravity).
+
+## Scoring: per-square + merge bonus · 2026-10-20
+
+Each square in a cleared row scores POINTS_PER_SQUARE (10). Each merged piece caught in the row scores an additional bonus equal to (squares in that merged piece × current multiplier). This makes clearing rows with big merged blocks rewarding. Also considered: flat bonus per merged piece regardless of size, and no bonus (too little incentive to merge).
+
+## Replaced: Groups of 4 or more pop · 2026-10-20
+
+The groups-of-4 pop rule was too easy and not intuitive. Players found that pops happened too frequently and there was little strategy. The merge + full-row-clear mechanic is harder and more readable: you can see a full row, you can see a merge forming. Also considered: raising the groups threshold (still abstract), keeping groups-of-4 with a stricter rule (still too frequent), or removing pops entirely (game would stall).
+
+## Replaced: A completed row paints only the touched run · 2026-10-20
+
+The row-run painting was part of the groups-of-4 system. Full-row clear is a single condition — no painting needed. Also considered: paint the row to a uniform color (adds another layer), keep run-painting with row-clear (confusing).
+
+## Replaced: Only new connections pop in a chain · 2026-10-20
+
+There are no chain pops in the new system. A row clear removes a full row; blocks above fall as solid units. No falling squares re-check for groups. Also considered: chains from falling merged pieces (complex, unpredictable), and chains from falling loose squares (same problem).

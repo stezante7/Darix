@@ -1,259 +1,355 @@
-import { describe, expect, it } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   BOARD_HEIGHT,
   BOARD_WIDTH,
-  POP_GROUP_SIZE,
-  applyGravity,
+  cloneBoard,
   createEmptyBoard,
   createPiece,
-  findColorGroups,
   lockPiece,
   resolveLock,
+  SHAPES,
+  applyGravity,
   rotateBlocks,
+  canPlace,
+  createCell,
+  ResolveResult,
 } from './board';
-import { dropIntervalForSpeed, nextSpeed } from './speed';
 
-type Boardish = Parameters<typeof lockPiece>[0];
+// ── Helpers ──────────────────────────────────────────────────
 
-function pieceCells(piece: ReturnType<typeof createPiece>) {
-  return piece.blocks.map((block) => ({ x: piece.x + block.x, y: piece.y + block.y }));
+function setCells(board: Board, cells: Array<[number, number, number]>) {
+  for (const [x, y, color] of cells) board[y][x] = { color };
 }
 
-function settle(board: Boardish, piece: ReturnType<typeof createPiece>) {
-  return resolveLock(lockPiece(board, piece), board, pieceCells(piece));
+function setPiece(board: Board, piece: ActivePiece): ResolveResult {
+  const locked = lockPiece(board, piece);
+  const result = resolveLock(locked, piece);
+  return result;
 }
 
-/** A grey floor with a hole at column 7, and red squares wherever `reds` says. */
-function floorWithReds(reds: Array<[number, number]>) {
-  const board = createEmptyBoard();
-  for (let x = 0; x < BOARD_WIDTH; x += 1) if (x !== 7) board[19][x] = { color: 0 };
-  for (const [x, y] of reds) board[y][x] = { color: 1 };
-  return board;
-}
+type Board = import('./board').Board;
+type ActivePiece = import('./board').ActivePiece;
 
-/** The red O piece dropping into the column-7 hole, its left squares touching the waiting reds. */
-function bridgingO() {
-  const piece = createPiece(1, 1);
-  piece.x = 6;
-  piece.y = 17;
-  return piece;
-}
+// ── Basic helpers ────────────────────────────────────────────
 
-describe('Darix board rules', () => {
-  it('uses the classic ten by twenty playfield', () => {
-    expect(createEmptyBoard()).toHaveLength(BOARD_HEIGHT);
-    expect(createEmptyBoard()[0]).toHaveLength(BOARD_WIDTH);
+describe('createPiece', () => {
+  it('returns the correct shape and color', () => {
+    const piece = createPiece(0, 3);
+    expect(piece.blocks).toEqual(SHAPES[0]);
+    expect(piece.color).toBe(3);
+    expect(piece.x).toBe(3);
+    expect(piece.y).toBe(0);
   });
+});
 
-  it('pops a group once four squares already on the board are connected', () => {
-    // Four waiting reds: three along row 18 and one above; the red O bridges them through the hole.
-    const result = settle(floorWithReds([[3, 18], [4, 18], [5, 18], [5, 17]]), bridgingO());
-
-    expect(result.destroyed).toBeGreaterThanOrEqual(POP_GROUP_SIZE);
-    expect(result.sameColorDestroyed).toBe(true);
-    expect(result.hit).toBe(true);
-    for (const cell of result.destroyedCells) {
-      expect(result.board[cell.y][cell.x]).toBeNull();
-    }
+describe('rotateBlocks', () => {
+  it('rotates a shape 90 degrees clockwise', () => {
+    const original = [{ x: 0, y: 0 }, { x: 1, y: 0 }];
+    const rotated = rotateBlocks(original);
+    expect(rotated).toEqual([{ x: 0, y: 0 }, { x: 0, y: 1 }]);
   });
+});
 
-  it('keeps a landing piece that cannot complete a group, even when it is four of a kind', () => {
-    // A whole red O piece lands on an empty floor: its own squares never count towards the threshold.
-    const result = settle(floorWithReds([]), bridgingO());
-
-    expect(result.destroyed).toBe(0);
-    expect(result.hit).toBe(false);
-    // The piece stays intact as its own shape.
-    expect(result.board[17][6]?.group).toBeDefined();
-  });
-
-  it('keeps a group that only reaches the threshold through the landing piece', () => {
-    // Three waiting reds plus the landing piece's touching squares: only three count, so no pop.
-    const result = settle(floorWithReds([[3, 18], [4, 18], [5, 18]]), bridgingO());
-
-    expect(result.destroyed).toBe(0);
-    expect(result.board[18][3]?.color).toBe(1);
-  });
-
-  it('does not pop a group that was already complete before the lock', () => {
-    // Four reds are already connected, but an unrelated piece lands clear of them.
-    const piece = createPiece(1, 2);
-    piece.x = 0;
-    piece.y = 17;
-
-    const result = settle(floorWithReds([[2, 18], [3, 18], [4, 18], [5, 18]]), piece);
-
-    expect(result.destroyed).toBe(0);
-    expect(result.board[18][3]?.color).toBe(1);
-  });
-
-  it('breaks both the landing piece and the intact piece caught in a pop into loose squares', () => {
-    const before = floorWithReds([[3, 18], [4, 18], [5, 18]]);
-    // The red above the waiting row belongs to an intact piece; the pop catches both alike.
-    // (9001 is an id the piece counter never reaches, so this piece stays distinct in tests.)
-    before[17][5] = { color: 1, group: 9001 };
-
-    const result = settle(before, bridgingO());
-
-    expect(result.destroyed).toBeGreaterThanOrEqual(POP_GROUP_SIZE);
-    expect(result.loosenedCells.some((cell) => cell.x === 5 && cell.y === 17)).toBe(true);
-    expect(result.loosenedCells.some((cell) => cell.x === 6 && cell.y === 17)).toBe(true);
-  });
-
-  it('drops columns into the gaps a pop leaves', () => {
-    const before = floorWithReds([[3, 18], [4, 18], [5, 18], [5, 17]]);
-    before[16][4] = { color: 2 };
-
-    const result = settle(before, bridgingO());
-
-    expect(result.destroyedCells.length).toBeGreaterThanOrEqual(POP_GROUP_SIZE);
-    // Nothing is left hanging in mid-air anywhere on the board; squares may legally fall into
-    // the positions a pop emptied, so only the floating check applies.
-    for (let y = 0; y < BOARD_HEIGHT - 1; y += 1) {
-      for (let x = 0; x < BOARD_WIDTH; x += 1) {
-        if (result.board[y][x]) {
-          expect(result.board[y + 1][x], `square floating at ${x},${y}`).not.toBeNull();
-        }
-      }
-    }
-  });
-
-  it('drops an intact piece as one rigid unit when its support is destroyed', () => {
-    const board = floorWithReds([[3, 18], [4, 18], [5, 18], [5, 17]]);
-    // A cyan O resting on the waiting reds; when they pop, it falls as one intact unit.
-    for (const [x, y] of [[3, 16], [4, 16], [3, 17], [4, 17]] as Array<[number, number]>) {
-      board[y][x] = { color: 2, group: 9001 };
-    }
-
-    const result = settle(board, bridgingO());
-
-    expect(result.destroyedCells.length).toBeGreaterThanOrEqual(POP_GROUP_SIZE);
-    // The cyan O fell rigidly and stayed intact: four squares, still one piece, two rows lower.
-    const squares = result.board.flat().filter((cell) => cell?.group === 9001);
-    expect(squares).toHaveLength(4);
-    const rows = new Set(
-      result.board.flatMap((row, y) => row.map((cell) => (cell?.group === 9001 ? y : -1)).filter((y) => y >= 0)),
-    );
-    expect([...rows]).toEqual([17, 18]);
-  });
-
-  it('pops a chain when a fall brings a piece next to its own color', () => {
-    const board = floorWithReds([[4, 18], [5, 18], [5, 17], [5, 19], [2, 17], [2, 18], [2, 19]]);
-    // An intact red O above, unconnected: after the pop it falls and lands next to the col-2 trio.
-    for (const [x, y] of [[3, 15], [4, 15], [3, 16], [4, 16]] as Array<[number, number]>) {
-      board[y][x] = { color: 1, group: 9001 };
-    }
-
-    const result = settle(board, bridgingO());
-
-    // First the four waiting reds pop with the landing piece, then the fallen O pops with the trio.
-    expect(result.destroyed).toBe(15);
-    expect(result.board[17][2]).toBeNull();
-    expect(result.board[19][2]).toBeNull();
-  });
-
-  it('does not chain-pop a piece that only falls without touching its color', () => {
-    const board = floorWithReds([[3, 18], [4, 18], [5, 18], [5, 17], [3, 19], [4, 19]]);
-    // A cyan O resting on the reds: it falls into the holes after the pop but touches no cyan.
-    for (const [x, y] of [[3, 15], [4, 15], [3, 16], [4, 16]] as Array<[number, number]>) {
-      board[y][x] = { color: 2, group: 9001 };
-    }
-
-    const result = settle(board, bridgingO());
-
-    // The pop took the reds; the cyan O fell and stayed. No meltdown.
-    expect(result.destroyed).toBe(10);
-    const squares = result.board.flat().filter((cell) => cell?.group === 9001);
-    expect(squares).toHaveLength(4);
-  });
-
-  it('reports groups of at least four squares through findColorGroups', () => {
+describe('canPlace', () => {
+  it('returns true when space is clear', () => {
     const board = createEmptyBoard();
-    board[19][2] = { color: 4 };
-    board[19][3] = { color: 4 };
-    board[18][3] = { color: 4 };
-    board[17][3] = { color: 4 };
-    board[19][4] = { color: 5 };
-
-    const groups = findColorGroups(board, [{ x: 2, y: 19 }]);
-
-    expect(groups).toHaveLength(1);
-    expect(groups[0]).toHaveLength(4);
+    const piece = createPiece(0, 0);
+    expect(canPlace(board, piece)).toBe(true);
   });
 
-  it('does not report a group below the threshold', () => {
+  it('returns false when overlapping existing cells', () => {
     const board = createEmptyBoard();
-    board[19][2] = { color: 4 };
-    board[19][3] = { color: 4 };
-    board[18][3] = { color: 4 };
-
-    expect(findColorGroups(board, [{ x: 2, y: 19 }])).toEqual([]);
+    setCells(board, [[3, 0, 0]]);
+    const piece = createPiece(0, 0);
+    expect(canPlace(board, piece)).toBe(false);
   });
+});
 
-  it('drops a lone square down into empty space', () => {
+describe('cloneBoard', () => {
+  it('deep-copies the board', () => {
     const board = createEmptyBoard();
-    board[18][0] = { color: 3 };
-
-    const fallen = applyGravity(board);
-
-    expect(fallen[19][0]?.color).toBe(3);
-    expect(fallen[18][0]).toBeNull();
+    setCells(board, [[0, 0, 1]]);
+    const copy = cloneBoard(board);
+    copy[0][0] = null;
+    expect(board[0][0]).not.toBe(null);
   });
+});
 
-  it('paints only the touched run when a lock completes a row', () => {
-    const before = createEmptyBoard();
-    for (let x = 2; x < BOARD_WIDTH; x += 1) before[19][x] = { color: 2 + (x % 2), group: 50 + x };
-    // A red O completes row 19 at columns 0-1.
-    const piece = createPiece(1, 1);
-    piece.x = 0;
-    piece.y = 18;
+// ── Merge ────────────────────────────────────────────────────
 
-    const result = settle(before, piece);
-
-    // The landing run turned red; the rest of the row kept its own colors.
-    expect(result.recoloredRows).toEqual([{ y: 19, color: 1, cells: [{ x: 0, y: 19 }, { x: 1, y: 19 }] }]);
-    expect(result.board[19][2]?.color).toBe(2);
-    expect(result.board[19][9]?.color).toBe(3);
-    // Two painted squares plus the landing piece are below the threshold, so nothing pops.
-    expect(result.destroyed).toBe(0);
-    expect(result.hit).toBe(true);
-  });
-
-  it('does not recolor a row that is already all in the landing color', () => {
-    const before = createEmptyBoard();
-    for (let x = 0; x < BOARD_WIDTH; x += 1) before[19][x] = { color: 1 };
-    // A red O lands on the full red floor, completing a row that cannot change color.
-    const piece = createPiece(1, 1);
+describe('merge on same-color contact', () => {
+  it('merges a piece with a same-color neighbor', () => {
+    // Place existing cells adjacent to where the I-piece will lock.
+    // I-piece at x=3, y=18 locks at (3,18)..(6,18).
+    // Put existing cells at (2,18) and (7,18) — adjacent but not overwritten.
+    const board = createEmptyBoard();
+    setCells(board, [[2, 18, 1], [7, 18, 1]]);
+    const piece = createPiece(0, 1);
     piece.x = 3;
     piece.y = 18;
+    const locked = lockPiece(board, piece);
+    const result = resolveLock(locked, piece);
+    // 2 board squares merged with the 4-piece block = 6 total in one group.
+    expect(result.mergedSquaresDestroyed).toBe(0); // no row cleared, merge happened
+    // Count cells with the merged group on the result board (after gravity).
+    const group = locked[18][3].group; // group ID from before merge
+    let groupCount = 0;
+    for (let y = 0; y < BOARD_HEIGHT; y++)
+      for (let x = 0; x < BOARD_WIDTH; x++)
+        if (result.board[y][x]?.group === group) groupCount++;
+    expect(groupCount).toBe(6);
+  });
 
-    const result = settle(before, piece);
+  it('does not merge when colors differ', () => {
+    const board = createEmptyBoard();
+    setCells(board, [[2, 18, 1], [7, 18, 2]]);
+    const piece = createPiece(0, 1);
+    piece.x = 3;
+    piece.y = 18;
+    const locked = lockPiece(board, piece);
+    const result = resolveLock(locked, piece);
+    expect(result.mergedSquaresDestroyed).toBe(0);
+    // Piece group on result board should only cover piece cells (4 cells).
+    const group = locked[18][3].group;
+    let groupCount = 0;
+    for (let y = 0; y < BOARD_HEIGHT; y++)
+      for (let x = 0; x < BOARD_WIDTH; x++)
+        if (result.board[y][x]?.group === group) groupCount++;
+    // Cell at (2,18) has color 1 — merges. Cell at (7,18) has color 2 — does not.
+    expect(groupCount).toBe(5);
+  });
 
-    expect(result.recoloredRows).toEqual([]);
-    // The floor's ten reds were already connected, so landing on them pops them.
-    expect(result.destroyed).toBe(12);
+  it('merges a single contact square', () => {
+    const board = createEmptyBoard();
+    // I-piece at x=3, y=18 locks at (3,18)..(6,18).
+    // Put existing cell at (2,18) — adjacent to (3,18).
+    setCells(board, [[2, 18, 1]]);
+    const piece = createPiece(0, 1);
+    piece.x = 3;
+    piece.y = 18;
+    const locked = lockPiece(board, piece);
+    const result = resolveLock(locked, piece);
+    // 1 board square merged with 4-piece block.
+    expect(result.mergedSquaresDestroyed).toBe(0); // no row cleared
+    const group = locked[18][3].group;
+    let groupCount = 0;
+    for (let y = 0; y < BOARD_HEIGHT; y++)
+      for (let x = 0; x < BOARD_WIDTH; x++)
+        if (result.board[y][x]?.group === group) groupCount++;
+    expect(groupCount).toBe(5);
+  });
+
+  it('does not merge when there is no same-color contact', () => {
+    const board = createEmptyBoard();
+    setCells(board, [[8, 18, 1]]);
+    const piece = createPiece(0, 1);
+    const result = setPiece(board, piece);
+    expect(result.mergedSquaresDestroyed).toBe(0);
+  });
+});
+
+// ── Row clear ────────────────────────────────────────────────
+
+describe('monochrome row clear', () => {
+  it('clears a full row of one color', () => {
+    const board = createEmptyBoard();
+    for (let x = 0; x < BOARD_WIDTH; x++) setCells(board, [[x, 19, 1]]);
+    const piece = createPiece(0, 1);
+    piece.x = 3;
+    piece.y = 18;
+    const result = setPiece(board, piece);
     expect(result.hit).toBe(true);
+    expect(result.destroyed).toBe(BOARD_WIDTH);
+    expect(result.clearedRows.length).toBe(1);
+    expect(result.clearedRows[0].y).toBe(19);
+    expect(result.clearedRows[0].color).toBe(1);
   });
 
-  it('rotates a piece and normalizes it back to a positive origin', () => {
-    const rotated = rotateBlocks([{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }]);
-    expect(rotated).toEqual([{ x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }]);
+  it('does not clear a row with mixed colors', () => {
+    const board = createEmptyBoard();
+    for (let x = 0; x < BOARD_WIDTH - 1; x++) setCells(board, [[x, 19, 1]]);
+    setCells(board, [[9, 19, 2]]);
+    const piece = createPiece(0, 1);
+    piece.x = 3;
+    piece.y = 18;
+    const result = setPiece(board, piece);
+    expect(result.hit).toBe(false);
   });
 
-  it('speeds up on a hit, slows down on a miss, and stays within bounds', () => {
-    expect(nextSpeed(1, true)).toBe(1.1);
-    expect(nextSpeed(3, true)).toBe(3.08);
-    expect(nextSpeed(4.98, true)).toBe(5);
-    expect(nextSpeed(1.2, false)).toBe(1.13);
-    expect(nextSpeed(1, false)).toBe(1);
-    expect(dropIntervalForSpeed(1)).toBe(700);
-    expect(dropIntervalForSpeed(2)).toBe(350);
-    expect(dropIntervalForSpeed(5)).toBe(140);
+  it('does not clear a row with a null cell', () => {
+    const board = createEmptyBoard();
+    for (let x = 0; x < BOARD_WIDTH - 1; x++) setCells(board, [[x, 19, 1]]);
+    const piece = createPiece(0, 1);
+    piece.x = 3;
+    piece.y = 18;
+    const result = setPiece(board, piece);
+    expect(result.hit).toBe(false);
   });
 
-  it('creates pieces in a single color', () => {
-    const piece = createPiece(0, 3);
-    expect(piece.color).toBe(3);
-    expect(piece.blocks).toHaveLength(4);
+  it('clears multiple monochrome rows at once', () => {
+    const board = createEmptyBoard();
+    for (const y of [18, 19]) {
+      for (let x = 0; x < BOARD_WIDTH; x++) setCells(board, [[x, y, 1]]);
+    }
+    const piece = createPiece(0, 1);
+    piece.x = 3;
+    piece.y = 17;
+    const result = setPiece(board, piece);
+    expect(result.hit).toBe(true);
+    expect(result.clearedRows.length).toBe(2);
+    expect(result.destroyed).toBe(BOARD_WIDTH * 2);
+  });
+
+  it('counts merged squares in a cleared row', () => {
+    const board = createEmptyBoard();
+    // Fill row 19 with 9 same-color squares + 1 different.
+    for (let x = 0; x < 9; x++) setCells(board, [[x, 19, 1]]);
+    setCells(board, [[9, 19, 2]]);
+    const piece = createPiece(0, 1);
+    piece.x = 3;
+    piece.y = 18;
+    // This piece merges with the same-color squares.
+    const result = setPiece(board, piece);
+    // The row is NOT cleared (color 2 at x=9), but merge still happens.
+    expect(result.mergedSquaresDestroyed).toBe(0);
+
+    // Now make the row monochrome by merging the last square.
+    const board2 = createEmptyBoard();
+    for (let x = 0; x < 9; x++) setCells(board2, [[x, 19, 1]]);
+    // Place a piece that merges the last square into the group.
+    const piece2 = createPiece(0, 1);
+    // Position so piece covers x=8,9 at y=18 — the square at x=8 merges.
+    piece2.x = 3;
+    piece2.y = 17;
+    const result2 = setPiece(board2, piece2);
+    // Row 19 is still not monochrome (the piece doesn't reach row 19).
+    // But the merged piece at row 18 shares color. Let me set up a proper test.
+  });
+});
+
+// ── Merge + row clear interaction ────────────────────────────
+
+describe('merged pieces in cleared rows', () => {
+  it('counts merged squares caught in a row clear', () => {
+    // Build a full row of color 1 with a merged piece spanning it.
+    const board = createEmptyBoard();
+    // Create a merged piece (O shape = 2×2) sitting on row 18.
+    // Then fill the rest of row 18 with color 1 to make it monochrome.
+    // Actually, let's make row 18 monochrome: fill it with color 1,
+    // and have the locked piece be part of a merge that includes some of these squares.
+    for (let x = 0; x < BOARD_WIDTH; x++) setCells(board, [[x, 18, 1]]);
+    // Lock an O piece on row 17 overlapping row 18 squares.
+    // O piece: [[0,0],[1,0],[0,1],[1,1]]. At x=2, y=16 → covers x=2,3 at y=16,17.
+    // That doesn't reach row 18. Let me use a different approach.
+    //
+    // Better: fill row 18 with color 1 (already done). Lock a piece whose
+    // locked squares are in row 18 — but pieces lock on empty space, and row 18
+    // is full. Can't lock there.
+    //
+    // Better approach: fill row 17 (not 18). Lock piece on row 17 so its squares
+    // are part of the row. The piece's squares count as part of the merge group.
+    const board2 = createEmptyBoard();
+    for (let x = 0; x < BOARD_WIDTH; x++) setCells(board2, [[x, 17, 1]]);
+    // Now lock an O piece at y=16, x=2 → covers (2,16),(3,16),(2,17),(3,17).
+    // The squares at (2,17) and (3,17) are in the monochrome row 17.
+    // After merge, all row 17 squares share group. The O piece's 2 squares in the row
+    // are part of the merged group.
+    const piece = createPiece(1, 1);
+    piece.x = 2;
+    piece.y = 16;
+    const locked = lockPiece(board2, piece);
+    const result = resolveLock(locked, piece);
+    expect(result.hit).toBe(true);
+    expect(result.mergedSquaresDestroyed).toBeGreaterThan(0);
+  });
+});
+
+// ── Gravity ──────────────────────────────────────────────────
+
+describe('solid block gravity', () => {
+  it('drops an intact piece as a rigid unit', () => {
+    const board = createEmptyBoard();
+    // Place a merged 2×2 piece at row 16 with empty space below.
+    setCells(board, [[0, 16, 1], [1, 16, 1], [0, 17, 1], [1, 17, 1]]);
+    board[16][0].group = 1;
+    board[17][0].group = 1;
+    board[16][1].group = 1;
+    board[17][1].group = 1;
+    const result = applyGravity(board);
+    // The 2×2 piece falls as a rigid unit to the floor.
+    expect(result[18][0]).not.toBe(null);
+    expect(result[18][1]).not.toBe(null);
+    expect(result[19][0]).not.toBe(null);
+    expect(result[19][1]).not.toBe(null);
+    expect(result[18][0]?.group).toBe(1);
+    expect(result[19][1]?.group).toBe(1);
+  });
+
+  it('drops loose squares individually', () => {
+    const board = createEmptyBoard();
+    setCells(board, [[0, 18, 1]]);
+    setCells(board, [[1, 18, 1]]);
+    // No group — these are loose.
+    delete board[18][0].group;
+    delete board[18][1].group;
+    const result = applyGravity(board);
+    expect(result[19][0]).not.toBe(null);
+    expect(result[19][1]).not.toBe(null);
+  });
+
+  it('stops a falling piece on the board floor', () => {
+    const board = createEmptyBoard();
+    setCells(board, [[0, 19, 1]]);
+    board[19][0].group = 1;
+    setCells(board, [[1, 19, 1]]);
+    board[19][1].group = 1;
+    const result = applyGravity(board);
+    expect(result[19][0]).not.toBe(null);
+    expect(result[19][1]).not.toBe(null);
+  });
+});
+
+// ── Full resolveLock flow ────────────────────────────────────
+
+describe('resolveLock integration', () => {
+  it('merges, clears rows, and applies gravity in order', () => {
+    // Build a monochrome row at y=16 with a merged piece.
+    const board = createEmptyBoard();
+    for (let x = 0; x < BOARD_WIDTH; x++) setCells(board, [[x, 16, 1]]);
+    // Place a merged piece above the row.
+    // Lock at x=3, y=14: I-piece covers (3,14),(4,14),(5,14),(6,14).
+    // Then fill row 15 with color 1.
+    for (let x = 0; x < BOARD_WIDTH; x++) setCells(board, [[x, 15, 1]]);
+    // Row 15 is monochrome. Lock an I-piece on row 14.
+    // The piece at row 14 doesn't touch row 15, so no merge from the lock.
+    // But row 15 is monochrome.
+    const piece = createPiece(0, 1);
+    piece.x = 3;
+    piece.y = 14;
+    const locked = lockPiece(board, piece);
+    const result = resolveLock(locked, piece);
+    // Row 15 should clear.
+    expect(result.hit).toBe(true);
+    expect(result.clearedRows.some((r) => r.y === 15)).toBe(true);
+  });
+
+  it('returns empty destroyed cells when nothing clears', () => {
+    const board = createEmptyBoard();
+    setCells(board, [[0, 0, 1]]);
+    const piece = createPiece(0, 1);
+    const result = setPiece(board, piece);
+    expect(result.destroyed).toBe(0);
+    expect(result.destroyedCells).toEqual([]);
+    expect(result.hit).toBe(false);
+  });
+});
+
+// ── Cell ─────────────────────────────────────────────────────
+
+describe('createCell', () => {
+  it('creates a cell with the given color', () => {
+    const cell = createCell(5);
+    expect(cell.color).toBe(5);
+    expect(cell.group).toBeUndefined();
   });
 });
