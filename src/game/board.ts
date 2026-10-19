@@ -30,10 +30,84 @@ export interface RandomSource {
   (): number;
 }
 
+// ── Coordinates ─────────────────────────────────────────────
+// The whole board talks about squares as Points, never as a pair of loop indexes.
+
+/** Every column index, left to right. */
+export const COLS: number[] = Array.from({ length: BOARD_WIDTH }, (_, x) => x);
+/** Every row index, top to bottom. */
+export const ROWS: number[] = Array.from({ length: BOARD_HEIGHT }, (_, y) => y);
+/** Every square on the board, left to right and top to bottom. */
+export const CELLS: Point[] = ROWS.flatMap((y) => COLS.map((x) => ({ x, y })));
+/** The four steps to a neighbouring square. */
+export const DIRECTIONS: Point[] = [
+  { x: 1, y: 0 },
+  { x: -1, y: 0 },
+  { x: 0, y: 1 },
+  { x: 0, y: -1 },
+];
+
+/** A square as a map key. */
+export const key = (p: Point): string => `${p.x},${p.y}`;
+
+export const inBounds = (p: Point): boolean =>
+  p.x >= 0 && p.x < BOARD_WIDTH && p.y >= 0 && p.y < BOARD_HEIGHT;
+
+/** The squares a step away from this one, off-board steps dropped. */
+export const neighbours = (p: Point): Point[] =>
+  DIRECTIONS.map((d) => ({ x: p.x + d.x, y: p.y + d.y })).filter(inBounds);
+
+/** Two squares one step apart in any direction. */
+export const adjacent = (a: Point, b: Point): boolean =>
+  neighbours(a).some((p) => p.x === b.x && p.y === b.y);
+
+/** Every square below this one, down to the floor. */
+export const below = (p: Point): Point[] =>
+  Array.from({ length: BOARD_HEIGHT - p.y - 1 }, (_, step) => ({ x: p.x, y: p.y + step + 1 }));
+
+/** The squares of one row. */
+export const rowCells = (y: number): Point[] => COLS.map((x) => ({ x, y }));
+
+/** The cell in a square, or null when it is empty. */
+export const at = (board: Board, p: Point): Cell | null => board[p.y][p.x];
+
+/** The cell in a square, or null when it is empty or off the board. */
+export const peek = (board: Board, p: Point): Cell | null => (inBounds(p) ? at(board, p) : null);
+
+/** The squares that hold something. */
+export const occupiedCells = (board: Board): Point[] =>
+  CELLS.filter((p) => at(board, p) !== null);
+
+/**
+ * The one flood fill everything shares: points split into connected groups, where two squares
+ * land in the same group when a chain of `linked` squares joins them. `linked` has to be
+ * symmetric — the merge pass, the falling units and the clear all pass their own.
+ */
+export function connectedGroups(
+  points: Point[],
+  linked: (a: Point, b: Point) => boolean,
+): Point[][] {
+  return points.reduce<Point[][]>((groups, point) => {
+    const touched = groups.filter((group) => group.some((p) => linked(point, p)));
+    if (touched.length === 0) return [...groups, [point]];
+    const others = groups.filter((group) => !touched.includes(group));
+    return [...others, [point, ...touched.flat()]];
+  }, []);
+}
+
+/** A copy of the board with these squares replaced. Nothing passed in is touched. */
+export function writeCells(board: Board, entries: Array<[Point, Cell | null]>): Board {
+  const next = cloneBoard(board);
+  entries.forEach(([point, cell]) => {
+    next[point.y][point.x] = cell;
+  });
+  return next;
+}
+
+// ── Pieces ──────────────────────────────────────────────────
+
 export function createEmptyBoard(): Board {
-  return Array.from({ length: BOARD_HEIGHT }, () =>
-    Array<Cell | null>(BOARD_WIDTH).fill(null),
-  );
+  return ROWS.map(() => COLS.map<Cell | null>(() => null));
 }
 
 export function cloneBoard(board: Board): Board {
@@ -46,104 +120,165 @@ export function createCell(color: number): Cell {
 
 export function canPlace(board: Board, piece: ActivePiece, x = piece.x, y = piece.y): boolean {
   return piece.blocks.every((block) => {
-    const boardX = x + block.x;
-    const boardY = y + block.y;
+    const placed: Point = { x: x + block.x, y: y + block.y };
     return (
-      boardX >= 0 &&
-      boardX < BOARD_WIDTH &&
-      boardY >= 0 &&
-      boardY < BOARD_HEIGHT &&
-      board[boardY][boardX] === null
+      inBounds(placed) && at(board, placed) === null
     );
   });
 }
 
+/** The squares of a piece as they sit on the board. */
+export const cellsOf = (piece: ActivePiece): Point[] =>
+  piece.blocks.map((block) => ({ x: piece.x + block.x, y: piece.y + block.y }));
+
 let nextGroupId = 1;
 
-export function lockPiece(
-  board: Board,
-  piece: ActivePiece,
-): Board {
-  const locked = cloneBoard(board);
+/** A copy of the board with the piece written into it as one block. */
+export function lockPiece(board: Board, piece: ActivePiece): Board {
   const group = nextGroupId;
   nextGroupId += 1;
-  for (const block of piece.blocks) {
-    locked[piece.y + block.y][piece.x + block.x] = {
-      color: piece.color,
-      group,
-    };
-  }
-  return locked;
+  return writeCells(
+    board,
+    cellsOf(piece).map((point): [Point, Cell] => [point, { color: piece.color, group }]),
+  );
 }
 
-function key(x: number, y: number): string {
-  return `${x},${y}`;
+// ── Merge ───────────────────────────────────────────────────
+
+/** What one run of a single colour becomes: the oldest block in it owns the whole run. */
+interface RunPlan {
+  owner: number;
+  squares: Point[];
+  /** The squares that were in another block until now — how much this run merged. */
+  absorbed: Point[];
 }
 
-const DIRECTIONS: Point[] = [
-  { x: 1, y: 0 },
-  { x: -1, y: 0 },
-  { x: 0, y: 1 },
-  { x: 0, y: -1 },
-];
+/** The board split into runs of touching squares that share a colour. */
+const sameColourRuns = (board: Board): Point[][] =>
+  connectedGroups(
+    occupiedCells(board),
+    (a, b) => adjacent(a, b) && at(board, a)!.color === at(board, b)!.color,
+  );
+
+/** A run of loose squares has no block to belong to, so it is planned as nothing. */
+function planRun(board: Board, run: Point[]): RunPlan | undefined {
+  const owner = run.reduce((oldest, p) => Math.min(oldest, at(board, p)!.group ?? Infinity), Infinity);
+  if (owner === Infinity) return undefined;
+  return {
+    owner,
+    squares: run,
+    absorbed: run.filter((p) => at(board, p)!.group !== owner),
+  };
+}
+
+export interface MergeOutcome {
+  board: Board;
+  /** Squares that changed block, i.e. how much the board merged. */
+  absorbed: number;
+  /** The blocks that swallowed another block, so a merge can be shown. */
+  grew: number[];
+}
 
 /**
  * Merges every set of touching same-color squares into one solid block.
  *
- * Each connected run of one color keeps the lowest group id it already had, so the oldest
- * piece owns the merged block. Running this over the whole board rather than only from the
- * locked piece means two blocks that end up touching after a fall merge too — the board
- * never shows same-color squares that are not one block.
- * Returns how many squares changed block, which is how much the player merged.
+ * Each run of one color keeps the lowest group id it already had, so the oldest piece owns the
+ * merged block. Running this over the whole board rather than only from the locked piece means
+ * two blocks that end up touching after a fall merge too — the board never shows same-color
+ * squares that are not one block.
  */
-function mergeSameColor(board: Board, grew?: Set<number>): number {
-  const seen = new Set<string>();
-  let absorbed = 0;
+export function mergeSameColor(board: Board): MergeOutcome {
+  const plans = sameColourRuns(board)
+    .map((run) => planRun(board, run))
+    .filter((plan): plan is RunPlan => plan !== undefined);
 
-  for (let y = 0; y < BOARD_HEIGHT; y += 1) {
-    for (let x = 0; x < BOARD_WIDTH; x += 1) {
-      const start = board[y][x];
-      if (!start || seen.has(key(x, y))) continue;
+  const solid = (plan: RunPlan) => plan.absorbed.length > 0;
+  const rewritten = plans.flatMap(
+    (plan) =>
+      plan.squares.map((p): [Point, Cell] => [
+        p,
+        { ...at(board, p)!, group: plan.owner, ...(solid(plan) ? { merged: true } : {}) },
+      ]),
+  );
 
-      // Flood-fill this square's same-color run.
-      const run: Point[] = [{ x, y }];
-      seen.add(key(x, y));
-      for (let i = 0; i < run.length; i += 1) {
-        for (const dir of DIRECTIONS) {
-          const nx = run[i].x + dir.x;
-          const ny = run[i].y + dir.y;
-          if (nx < 0 || nx >= BOARD_WIDTH || ny < 0 || ny >= BOARD_HEIGHT) continue;
-          if (seen.has(key(nx, ny))) continue;
-          const cell = board[ny][nx];
-          if (!cell || cell.color !== start.color) continue;
-          seen.add(key(nx, ny));
-          run.push({ x: nx, y: ny });
-        }
-      }
-
-      const owner = run.reduce(
-        (lowest, pt) => Math.min(lowest, board[pt.y][pt.x]!.group ?? Infinity),
-        Infinity,
-      );
-      // A run that never belonged to a block just gets labelled; nothing was merged away.
-      if (owner === Infinity) continue;
-      // Several blocks in one run means they have just become one, which is what makes it solid.
-      const becameSolid = run.some((pt) => board[pt.y][pt.x]!.group !== owner);
-
-      for (const pt of run) {
-        const cell = board[pt.y][pt.x]!;
-        if (cell.group !== owner) {
-          absorbed += 1;
-          grew?.add(owner);
-        }
-        cell.group = owner;
-        if (becameSolid) cell.merged = true;
-      }
-    }
-  }
-
-  return absorbed;
+  return {
+    board: writeCells(board, rewritten),
+    absorbed: plans.reduce((count, plan) => count + plan.absorbed.length, 0),
+    grew: plans.filter(solid).map((plan) => plan.owner),
+  };
 }
+
+// ── Gravity ─────────────────────────────────────────────────
+
+/**
+ * Squares that fall together: a loose square alone, or a connected run of squares belonging to
+ * one block. Two squares are in the same unit when they touch and belong to the same block.
+ */
+export const fallingUnits = (board: Board): Point[][] =>
+  connectedGroups(occupiedCells(board), (a, b) => {
+    const group = at(board, a)?.group;
+    return (
+      group !== undefined && group === at(board, b)?.group && adjacent(a, b)
+    );
+  });
+
+/** How far one square can drop: the empty run beneath it, stopping at the first foreign square. */
+function dropLimit(board: Board, own: Set<string>, p: Point): number {
+  const firstBlocker = below(p).findIndex((spot) => at(board, spot) !== null && !own.has(key(spot)));
+  return firstBlocker === -1 ? below(p).length : firstBlocker;
+}
+
+/** How far a unit drops in one go: as far as its most blocked square can go. */
+export function fallDistance(board: Board, unit: Point[]): number {
+  const own = new Set(unit.map(key));
+  return unit.reduce((farthest, p) => Math.min(farthest, dropLimit(board, own, p)), BOARD_HEIGHT - 1);
+}
+
+/** A copy of the board with a unit moved down by `distance`. */
+function moveUnit(board: Board, unit: Point[], distance: number): Board {
+  const squares = unit.map((point) => ({ point, cell: at(board, point) }));
+  return writeCells(board, [
+    ...squares.map(({ point }): [Point, Cell | null] => [point, null]),
+    ...squares.map(
+      ({ point, cell }): [Point, Cell | null] => [
+        { x: point.x, y: point.y + distance },
+        cell && { ...cell },
+      ],
+    ),
+  ]);
+}
+
+const bottomOf = (unit: Point[]): number => Math.max(...unit.map((p) => p.y));
+
+/** Units with their lowest square nearest the floor first, so lower blocks move out of the way. */
+const unitsBottomUp = (board: Board): Point[][] =>
+  fallingUnits(board).sort((a, b) => bottomOf(b) - bottomOf(a));
+
+/** Drops every unit once, as far as it can go. `moved` counts the units that actually shifted. */
+function dropAll(board: Board): { board: Board; moved: number } {
+  return unitsBottomUp(board).reduce(
+    ({ board: next, moved }, unit) => {
+      const distance = fallDistance(next, unit);
+      return distance === 0
+        ? { board: next, moved }
+        : { board: moveUnit(next, unit, distance), moved: moved + 1 };
+    },
+    { board, moved: 0 },
+  );
+}
+
+/** Drops everything until nothing can move any more: loose squares on their own, blocks rigidly. */
+function dropUntilRest(board: Board): Board {
+  const { board: dropped, moved } = dropAll(board);
+  return moved === 0 ? dropped : dropUntilRest(dropped);
+}
+
+/** Returns a settled copy of the board. */
+export function applyGravity(board: Board): Board {
+  return dropUntilRest(cloneBoard(board));
+}
+
+// ── Row clears ──────────────────────────────────────────────
 
 export interface ClearedRow {
   y: number;
@@ -157,7 +292,7 @@ export interface ClearedRow {
  */
 export interface ClearStage {
   rows: ClearedRow[];
-  /** Snapshot with the cleared rows painted. The row is still physically there. */
+  /** Snapshot with the cleared squares painted. They are still physically there. */
   painted: Board;
   /**
    * Squares this stage removes, with the colour they were painted in. This is the whole of every
@@ -166,107 +301,87 @@ export interface ClearStage {
   cells: DestroyedCell[];
 }
 
-function rowIsFull(board: Board, y: number): boolean {
-  return board[y].every((cell) => cell !== null);
+export interface DestroyedCell extends Point {
+  color: number;
+  /** True when the square belonged to a block that had already merged. These score double. */
+  merged: boolean;
 }
+
+const rowIsFull = (board: Board, y: number): boolean =>
+  board[y].every((cell) => cell !== null);
 
 /** Indexes of the rows that are completely full. Colours do not matter — a row goes when it is full. */
-function fullRowIndexes(board: Board): number[] {
-  const rows: number[] = [];
-  for (let y = 0; y < BOARD_HEIGHT; y += 1) {
-    if (rowIsFull(board, y)) rows.push(y);
-  }
-  return rows;
-}
-
-/** Removes the squares a clear took. */
-function removeCells(board: Board, cells: DestroyedCell[]): void {
-  for (const cell of cells) board[cell.y][cell.x] = null;
-}
+const fullRowIndexes = (board: Board): number[] => ROWS.filter((y) => rowIsFull(board, y));
 
 /**
  * The colour that completed a row left full by a fall: the colour of the square that dropped into
  * one of its holes. `beforeFalls` is the board as it was with the holes still open.
  */
 function completingColor(board: Board, beforeFalls: Board, y: number): number {
-  for (let x = 0; x < BOARD_WIDTH; x += 1) {
-    const cell = board[y][x];
-    if (cell && beforeFalls[y][x] === null) return cell.color;
-  }
-  return board[y][0]!.color;
+  const filled = rowCells(y).filter((p) => at(beforeFalls, p) === null);
+  return at(board, filled[0] ?? { x: 0, y })!.color;
 }
 
-/** Squares that fall together: a loose square alone, or a connected run of squares from one intact piece. */
-function fallingUnits(board: Board): Point[][] {
-  const seen = new Set<string>();
-  const units: Point[][] = [];
-  for (let y = 0; y < BOARD_HEIGHT; y += 1) {
-    for (let x = 0; x < BOARD_WIDTH; x += 1) {
-      const cell = board[y][x];
-      if (!cell || seen.has(key(x, y))) continue;
-      seen.add(key(x, y));
-      const unit: Point[] = [{ x, y }];
-      if (cell.group !== undefined) {
-        for (let index = 0; index < unit.length; index += 1) {
-          for (const direction of DIRECTIONS) {
-            const nextX = unit[index].x + direction.x;
-            const nextY = unit[index].y + direction.y;
-            if (nextX < 0 || nextX >= BOARD_WIDTH || nextY < 0 || nextY >= BOARD_HEIGHT) continue;
-            if (seen.has(nextX + "," + nextY) || board[nextY][nextX]?.group !== cell.group) continue;
-            seen.add(nextX + "," + nextY);
-            unit.push({ x: nextX, y: nextY });
-          }
-        }
-      }
-      units.push(unit);
-    }
-  }
-  return units;
-}
+/** The board with the cleared squares gone. */
+export const removeCells = (board: Board, cells: DestroyedCell[]): Board =>
+  writeCells(board, cells.map((cell): [Point, Cell | null] => [cell, null]));
 
 /**
- * Drops every unsupported unit in place until the board settles. Loose squares fall on their own;
- * intact pieces fall rigidly until any of their squares is supported.
+ * What one clear takes, ready to be shown: the full rows, plus the rest of any block that had a
+ * square in one of them. A merged blob straddling a cleared row goes whole — the part above the
+ * line dies with the part inside it. Every doomed square gets the colour of the row that claimed
+ * it, and the first row down claims its blocks, so a block caught between two clears in the same
+ * stage is neither painted nor scored twice.
  */
-function settleUnits(board: Board): void {
-  let moved = true;
-  while (moved) {
-    moved = false;
-    const units = fallingUnits(board).sort(
-      (a, b) => Math.max(...b.map((pt) => pt.y)) - Math.max(...a.map((pt) => pt.y)),
-    );
-    for (const unit of units) {
-      const own = new Set(unit.map((pt) => key(pt.x, pt.y)));
-      const canFall = () => unit.every((pt) =>
-        pt.y + 1 < BOARD_HEIGHT &&
-        (board[pt.y + 1][pt.x] === null || own.has(key(pt.x, pt.y + 1))),
-      );
-      while (canFall()) {
-        const cells = unit.map((pt) => board[pt.y][pt.x]);
-        for (const pt of unit) board[pt.y][pt.x] = null;
-        own.clear();
-        for (const [index, pt] of unit.entries()) {
-          pt.y += 1;
-          board[pt.y][pt.x] = cells[index];
-          own.add(key(pt.x, pt.y));
-        }
-        moved = true;
-      }
-    }
-  }
-}
+function collectClear(
+  board: Board,
+  rowIndexes: number[],
+  beforeFalls: Board,
+  lockColor: number,
+): ClearStage {
+  // The lock that filled the row is the completing block. For a row filled by a fall it is
+  // whichever block dropped into its hole. The whole row takes that colour as it goes.
+  const rows: ClearedRow[] = rowIndexes.map((y) => ({
+    y,
+    color: rowIsFull(beforeFalls, y) ? lockColor : completingColor(board, beforeFalls, y),
+  }));
+  /** Block id → the colour of the first cleared row its squares touch. */
+  const claimed = new Map<number, number>();
+  rows.forEach((row) =>
+    rowCells(row.y).forEach((p) => {
+      const group = at(board, p)!.group;
+      if (group !== undefined && !claimed.has(group)) claimed.set(group, row.color);
+    }),
+  );
 
-/** Returns a settled copy of the board. */
-export function applyGravity(board: Board): Board {
-  const settled = cloneBoard(board);
-  settleUnits(settled);
-  return settled;
-}
+  const doomed = new Map<string, DestroyedCell>();
+  const claim = (p: Point, color: number) => {
+    if (doomed.has(key(p))) return;
+    doomed.set(key(p), { ...p, color, merged: at(board, p)!.merged === true });
+  };
+  /** A square takes its block's colour when it has one, otherwise the colour of its own row. */
+  const colourFor = (p: Point): number | undefined => {
+    const group = at(board, p)!.group;
+    return group === undefined ? undefined : claimed.get(group);
+  };
+  // First the rows themselves, then everything those blocks own above and below them.
+  rows.forEach((row) =>
+    rowCells(row.y).forEach((p) => claim(p, colourFor(p) ?? row.color)),
+  );
+  CELLS.filter((p) => {
+    const group = at(board, p)?.group;
+    return group !== undefined && claimed.has(group);
+  }).forEach((p) => claim(p, claimed.get(at(board, p)!.group!)!));
 
-export interface DestroyedCell extends Point {
-  color: number;
-  /** True when the square belonged to a block that had already merged. These score double. */
-  merged: boolean;
+  const cells = [...doomed.values()];
+  return {
+    rows,
+    painted: writeCells(
+      board,
+      cells.map((cell): [Point, Cell] => [cell, { ...at(board, cell)!, color: cell.color }]),
+    ),
+    cells,
+  };
 }
 
 export interface ResolveResult {
@@ -285,65 +400,32 @@ export interface ResolveResult {
   mergedGroups: number[];
 }
 
-/**
- * The squares one clear takes: every square of the full rows, plus the rest of any block that had
- * a square in one of them. A merged blob straddling a cleared row goes whole — the part above the
- * line dies with the part inside it. Each doomed square is painted in the colour of the row that
- * claimed it; the first row down claims its blocks, so a block caught between two clears in the
- * same stage is not painted or scored twice.
- */
-function collectClear(
-  board: Board,
-  rowIndexes: number[],
-  beforeFalls: Board,
-  lockColor: number,
-): { rows: ClearedRow[]; cells: DestroyedCell[] } {
-  const rows: ClearedRow[] = [];
-  const cells: DestroyedCell[] = [];
-  const taken = new Set<string>();
-  /** Block id → the colour of the first cleared row that square's block touches. */
-  const claimed = new Map<number, number>();
+/** Blocks fall and, since a fall can leave two blocks touching, the board merges again. */
+const settle = (board: Board): MergeOutcome => mergeSameColor(dropUntilRest(board));
 
-  const take = (x: number, y: number, color: number) => {
-    const cell = board[y][x]!;
-    cell.color = color;
-    cells.push({ x, y, color, merged: cell.merged === true });
-    taken.add(key(x, y));
+interface ClearOutcome {
+  board: Board;
+  /** The clears this board went through, in the order they happened. */
+  stages: ClearStage[];
+  /** The settle after each clear, so nothing that merged is lost on the way out. */
+  merges: MergeOutcome[];
+}
+
+/** Clears every full row, then settles and clears again: a fall that fills a row completes it too. */
+function cascade(board: Board, beforeFalls: Board, lockColor: number): ClearOutcome {
+  const rowIndexes = fullRowIndexes(board);
+  if (rowIndexes.length === 0) return { board, stages: [], merges: [] };
+
+  const stage = collectClear(board, rowIndexes, beforeFalls, lockColor);
+  const cleared = removeCells(board, stage.cells);
+  const landed = settle(cleared);
+  const rest = cascade(landed.board, cleared, lockColor);
+
+  return {
+    board: rest.board,
+    stages: [stage, ...rest.stages],
+    merges: [landed, ...rest.merges],
   };
-
-  for (const y of rowIndexes) {
-    // The lock that filled the row is the completing block. For a row filled by a fall it is
-    // whichever block dropped into its hole. The whole row takes that colour as it goes.
-    const color = rowIsFull(beforeFalls, y) ? lockColor : completingColor(board, beforeFalls, y);
-    rows.push({ y, color });
-    for (let x = 0; x < BOARD_WIDTH; x += 1) {
-      const group = board[y][x]!.group;
-      if (group === undefined) {
-        take(x, y, color);
-        continue;
-      }
-      const claimedColor = claimed.get(group);
-      if (claimedColor === undefined) {
-        claimed.set(group, color);
-        take(x, y, color);
-      } else {
-        take(x, y, claimedColor);
-      }
-    }
-  }
-
-  // Everything else those blocks own, above the rows as well as below them.
-  for (let y = 0; y < BOARD_HEIGHT; y += 1) {
-    for (let x = 0; x < BOARD_WIDTH; x += 1) {
-      const group = board[y][x]?.group;
-      if (group === undefined || taken.has(key(x, y))) continue;
-      const claimedColor = claimed.get(group);
-      if (claimedColor === undefined) continue;
-      take(x, y, claimedColor);
-    }
-  }
-
-  return { rows, cells };
 }
 
 /**
@@ -351,55 +433,30 @@ function collectClear(
  * row it completed gets swept in.
  * 1. Merges same-color contact squares into one solid block.
  * 2. Everything settles, so a piece rests before its row is measured.
- * 3. Clears every full row, taking the whole of any block that reaches into it.
- * 4. Applies gravity so blocks settle, merging anything the falls leave touching, and clears again
- *    — a fall that fills a row completes that row too.
+ * 3. Clears every full row, taking the whole of any block that reaches into it, then settles and
+ *    clears again — a fall that fills a row completes that row too — until nothing is full.
  */
-/** Blocks fall and, since a fall can leave two blocks touching, the board merges again. */
-function settle(board: Board, grew?: Set<number>): Board {
-  const settled = applyGravity(board);
-  mergeSameColor(settled, grew);
-  return settled;
-}
-
 export function resolveLock(board: Board, lockColor: number): ResolveResult {
-  let resolved = cloneBoard(board);
-
-  // Step 1: Merge same-color contacts.
-  const grew = new Set<number>();
-  const mergedSquares = mergeSameColor(resolved, grew);
-
+  // Step 1: same-color contacts become one block; this merge alone is what the lock merged.
+  const locked = mergeSameColor(cloneBoard(board));
   // Step 2: everything settles, so a piece rests before its row is measured.
-  let beforeFalls = cloneBoard(resolved);
-  resolved = settle(resolved, grew);
+  const resting = settle(locked.board);
+  const cleared = cascade(resting.board, locked.board, lockColor);
 
-  // Step 3: a full row goes, whatever colours are in it. The blocks a clear leaves behind fall
-  // into the gaps and can complete another row, so this repeats until nothing is full.
-  const stages: ClearStage[] = [];
-  const destroyedCells: DestroyedCell[] = [];
-  while (true) {
-    const rowIndexes = fullRowIndexes(resolved);
-    if (rowIndexes.length === 0) break;
-
-    const { rows, cells } = collectClear(resolved, rowIndexes, beforeFalls, lockColor);
-    stages.push({ rows, painted: cloneBoard(resolved), cells });
-    destroyedCells.push(...cells);
-
-    removeCells(resolved, cells);
-    beforeFalls = cloneBoard(resolved);
-    resolved = settle(resolved, grew);
-  }
-
+  const merges = [locked, resting, ...cleared.merges];
+  const destroyedCells = cleared.stages.flatMap((stage) => stage.cells);
   return {
-    board: resolved,
+    board: cleared.board,
     destroyed: destroyedCells.length,
     destroyedCells,
-    hit: stages.length > 0,
-    stages,
-    mergedSquares,
-    mergedGroups: [...grew],
+    hit: cleared.stages.length > 0,
+    stages: cleared.stages,
+    mergedSquares: locked.absorbed,
+    mergedGroups: [...new Set(merges.flatMap((merge) => merge.grew))],
   };
 }
+
+// ── Shapes ──────────────────────────────────────────────────
 
 export function rotateBlocks(blocks: Point[]): Point[] {
   const rotated = blocks.map((block) => ({ x: -block.y, y: block.x }));

@@ -398,6 +398,20 @@ describe('solid block gravity', () => {
     expect(result[19][1]!.group).toBe(1);
   });
 
+  it('drops the parts of a broken block separately', () => {
+    const board = createEmptyBoard();
+    // One block id shared by two parts that no longer touch: a domino on the floor and the
+    // other one floating four rows up. They fall on their own, not as one rigid shape.
+    setBlock(board, [[1, 19], [2, 19], [1, 17], [2, 17]], 1);
+
+    const result = applyGravity(board);
+
+    expect(result[17][1]).toBe(null);
+    expect(result[17][2]).toBe(null);
+    expect(result[18][1]?.group).toBe(board[19][1]?.group);
+    expect(result[18][2]?.group).toBe(board[19][2]?.group);
+  });
+
   it('drops loose squares individually', () => {
     const board = createEmptyBoard();
     setCells(board, [[0, 18, 1]]);

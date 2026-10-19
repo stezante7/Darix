@@ -73,6 +73,8 @@ The merge pass replaces the groups-of-4 simplification after feedback that the g
 
 ## Progress
 
+- 2026-10-19: Functional refactor of the rules. One shared `connectedGroups` flood fill now sits behind the merge, gravity and the clear's block claim instead of three hand-rolled ones, the rules read as maps and reduces with no index loops left, and the renderer walks the occupied squares rather than every row and column. Checked against the pre-refactor rules by playing 10 seeded games (1200 locks) on both implementations: identical boards, clears and merges. It caught one real bug — a falling unit grouped a block's squares without requiring them to touch, so a block fell rigidly across the whole board. 34 tests pass.
+
 - 2026-10-19: Whole-block clears + no brake. A clear now takes the whole of any block reaching into the cleared row: painted in the row's colour, held, popped, then the cascade. Measured over 6 AI games — ~24 squares per clear, ~55% of them outside the row, biggest pop 56. A miss no longer takes speed off, so speed only climbs. 33 tests pass.
 
 - 2026-10-19: Clarity + payoff pass. A clear is now staged (row painted in its clearing colour → hold → squares pop → cascade), the sidebar's "Merged" counter is gone, merged blocks pulse when they grow, and merged squares score double in the clear they feed. 30 tests pass. Measured with a placement-heuristic AI over 3 games: ~166 locks and ~49 rows cleared per game, and 65% of cleared squares came from merged blocks, so the double is worth chasing without being the default.
@@ -106,3 +108,9 @@ The merge pass replaces the groups-of-4 simplification after feedback that the g
 - 2026-10-18: Agreed the simplification pass after player feedback that the colours-and-numbers rules were hard to grasp: no resolve numbers, groups of 4+ pop, row recolour stays, one colour per piece.
 - 2026-10-18: Implemented the new pop rules, row-run painting, and new-connection chains; rewrote the board tests around verified behaviour (21 passing) and updated the README, HUD tagline and preview.
 - 2026-10-19: Balance pass after play testing: merge flooded only from the locked piece so almost nothing merged, and the monochrome-only row clear never happened. Merge is now a whole-board pass; any full row clears and cascades; a cleared row is washed in the completing block's colour. 27 tests pass; a greedy AI clears 3.7 rows per game where the old rule cleared none.
+
+## Notes for Mochi
+
+- `src/game/board.ts` is the whole rule book: a `// ── Coordinates ──` vocabulary (`CELLS`, `neighbours`, `adjacent`, `below`, `at`/`peek`, `occupiedCells`, `writeCells`, `connectedGroups`) and then one section per rule — pieces, merge, gravity, row clears. Public entry points take a board and return a new one.
+- `src/game/boardLegacy.ts` is a frozen copy of the rules from before the refactor, kept only so `src/game/parity.test.ts` can play the same seeded games on both. `npx vitest run src/game/parity.test.ts` is the regression check; delete both once the new rules have been played enough to be trusted on their own.
+- Gravity stays order-dependent (lower units move first), and the unit list comes out of `connectedGroups` in a different order than the old flood fill produced. Same units, same result — but do not read anything into the order.

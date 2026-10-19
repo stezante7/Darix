@@ -2,26 +2,38 @@ import Phaser from 'phaser';
 import {
   BOARD_HEIGHT,
   BOARD_WIDTH,
+  CELLS,
   POINTS_PER_SQUARE,
+  ROWS,
   ActivePiece,
   Board,
   ClearStage,
   DestroyedCell,
-  ResolveResult,
   Point,
+  ResolveResult,
   SHAPES,
+  at,
   canPlace,
-  cloneBoard,
+  cellsOf,
   createEmptyBoard,
   createPiece,
+  key,
   lockPiece,
+  occupiedCells,
+  peek,
+  removeCells,
   resolveLock,
   rotateBlocks,
 } from './game/board';
 import { pieceColor } from './game/colors';
 import { MIN_SPEED, dropIntervalForSpeed, nextSpeed } from './game/speed';
 import { nextMultiplier } from './game/multiplier';
-import { getPiecePreview, PREVIEW_HEIGHT, PREVIEW_WIDTH } from './game/preview';
+import {
+  PREVIEW_HEIGHT,
+  PREVIEW_WIDTH,
+  PreviewCell,
+  getPiecePreview,
+} from './game/preview';
 import './style.css';
 
 // Lets the game install as an app and run offline. Skipped in dev so it never caches Vite's dev server.
@@ -34,6 +46,17 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
 const COLORS = [0xf97316, 0x22d3ee, 0xa78bfa, 0xf43f5e, 0x84cc16, 0xfacc15];
 const SHAPE_INSET = 2;
 const CORNER_RADIUS = 5;
+/** The four pairs of sides whose join makes a corner worth filling between two squares. */
+const JOINED_CORNERS: Array<[number, number]> = [
+  [-1, -1],
+  [1, -1],
+  [-1, 1],
+  [1, 1],
+];
+/** The next-piece grid, every tile once. Its size comes from the shape box, not from the board. */
+const PREVIEW_CELLS: Point[] = Array.from({ length: PREVIEW_HEIGHT }, (_, y) =>
+  Array.from({ length: PREVIEW_WIDTH }, (_, x) => ({ x, y })),
+).flat();
 
 /** A square that a row clear removed, with the points it is worth at the current multiplier. */
 type ScoredCell = DestroyedCell & { points: number };
@@ -247,7 +270,7 @@ class DarixScene extends Phaser.Scene {
       this.rotate();
     } else if (Math.abs(deltaX) > Math.abs(deltaY)) {
       const columns = Math.max(1, Math.floor(Math.abs(deltaX) / this.cellSize));
-      for (let step = 0; step < columns; step += 1) this.move(Math.sign(deltaX));
+      Array.from({ length: columns }, () => this.move(Math.sign(deltaX)));
     } else if (deltaY > threshold) {
       this.hardDrop();
     }
@@ -350,28 +373,27 @@ class DarixScene extends Phaser.Scene {
     const preview = document.querySelector<HTMLDivElement>('#next-piece-preview');
     if (!preview) return;
 
-    // Build a set of occupied cells for quick lookup
-    const occupied = new Set(getPiecePreview(this.nextPiece).map((c) => `${c.x},${c.y}`));
+    const occupied = new Map(getPiecePreview(this.nextPiece).map((c) => [key(c), c]));
+    preview.replaceChildren(...PREVIEW_CELLS.map((p) => this.previewTile(p, occupied)));
+  }
 
-    preview.replaceChildren();
-    for (let y = 0; y < PREVIEW_HEIGHT; y += 1) {
-      for (let x = 0; x < PREVIEW_WIDTH; x += 1) {
-        const tile = document.createElement('span');
-        tile.style.gridColumn = String(x + 1);
-        tile.style.gridRow = String(y + 1);
-        tile.setAttribute('aria-hidden', 'true');
-        const key = `${x},${y}`;
-        if (occupied.has(key)) {
-          tile.className = 'preview-cell';
-          const cell = getPiecePreview(this.nextPiece).find((c) => c.x === x && c.y === y)!;
-          // Slightly darken for contrast with the border
-          tile.style.backgroundColor = `#${this.darkerColor(COLORS[cell.color % COLORS.length], 0.82).toString(16).padStart(6, '0')}`;
-        } else {
-          tile.className = 'preview-cell preview-empty';
-        }
-        preview.append(tile);
-      }
+  /** One tile of the next-piece grid: filled where the piece has a square, empty elsewhere. */
+  private previewTile(p: Point, occupied: Map<string, PreviewCell>): HTMLSpanElement {
+    const tile = document.createElement('span');
+    tile.style.gridColumn = String(p.x + 1);
+    tile.style.gridRow = String(p.y + 1);
+    tile.setAttribute('aria-hidden', 'true');
+
+    const square = occupied.get(key(p));
+    if (!square) {
+      tile.className = 'preview-cell preview-empty';
+      return tile;
     }
+    tile.className = 'preview-cell';
+    // Slightly darken for contrast with the border
+    const color = this.darkerColor(COLORS[square.color % COLORS.length], 0.82);
+    tile.style.backgroundColor = `#${color.toString(16).padStart(6, '0')}`;
+    return tile;
   }
 
   private lockActivePiece(): void {
@@ -463,9 +485,7 @@ class DarixScene extends Phaser.Scene {
    *  the row reached is in `stage.cells`, so that is exactly what leaves the board. */
   private popClearStage(token: number, stage: ClearStage, scored: ScoredCell[], done: () => void): void {
     if (token !== this.animationToken) return;
-    const popped = cloneBoard(stage.painted);
-    for (const cell of stage.cells) popped[cell.y][cell.x] = null;
-    this.board = popped;
+    this.board = removeCells(stage.painted, stage.cells);
     this.draw();
     this.sendScoreParticles(scored);
     const pop = { scale: 1 };
@@ -488,14 +508,17 @@ class DarixScene extends Phaser.Scene {
     this.fxGraphics.clear();
     if (token !== this.animationToken || alpha <= 0) return;
     this.fxGraphics.fillStyle(0xffffff, alpha);
-    for (const cell of cells) {
-      this.fxGraphics.fillRect(
-        cell.x * this.cellSize + SHAPE_INSET,
-        cell.y * this.cellSize + SHAPE_INSET,
-        this.cellSize - SHAPE_INSET * 2,
-        this.cellSize - SHAPE_INSET * 2,
-      );
-    }
+    cells.forEach((cell) => this.fillBoardSquare(this.fxGraphics, cell));
+  }
+
+  /** One filled square of the board, inset the same way the pieces are. */
+  private fillBoardSquare(graphics: Phaser.GameObjects.Graphics, p: Point): void {
+    graphics.fillRect(
+      p.x * this.cellSize + SHAPE_INSET,
+      p.y * this.cellSize + SHAPE_INSET,
+      this.cellSize - SHAPE_INSET * 2,
+      this.cellSize - SHAPE_INSET * 2,
+    );
   }
 
   /** The cleared squares shrinking out of the board. */
@@ -508,7 +531,7 @@ class DarixScene extends Phaser.Scene {
     if (token !== this.animationToken || scale <= 0) return;
     const size = this.cellSize * scale;
     const inset = (this.cellSize - size) / 2;
-    for (const cell of cells) {
+    cells.forEach((cell) => {
       this.fxGraphics.fillStyle(COLORS[cell.color % COLORS.length], 1);
       this.fxGraphics.fillRoundedRect(
         cell.x * this.cellSize + inset,
@@ -517,18 +540,15 @@ class DarixScene extends Phaser.Scene {
         size,
         CORNER_RADIUS,
       );
-    }
+    });
   }
 
   /** Flashes the squares of every block that grew, so a merge is visible on the board. */
   private pulseMergedGroups(board: Board, groupIds: number[], token: number): void {
-    const cells: Point[] = [];
-    for (let y = 0; y < BOARD_HEIGHT; y += 1) {
-      for (let x = 0; x < BOARD_WIDTH; x += 1) {
-        const cell = board[y][x];
-        if (cell?.group !== undefined && groupIds.includes(cell.group)) cells.push({ x, y });
-      }
-    }
+    const cells = CELLS.filter((p) => {
+      const group = at(board, p)?.group;
+      return group !== undefined && groupIds.includes(group);
+    });
     if (cells.length === 0) return;
     const flash = { alpha: 0.8 };
     this.tweens.add({
@@ -539,14 +559,7 @@ class DarixScene extends Phaser.Scene {
         this.mergeGraphics.clear();
         if (token !== this.animationToken || flash.alpha <= 0) return;
         this.mergeGraphics.fillStyle(0xffffff, flash.alpha * 0.5);
-        for (const cell of cells) {
-          this.mergeGraphics.fillRect(
-            cell.x * this.cellSize + SHAPE_INSET,
-            cell.y * this.cellSize + SHAPE_INSET,
-            this.cellSize - SHAPE_INSET * 2,
-            this.cellSize - SHAPE_INSET * 2,
-          );
-        }
+        cells.forEach((cell) => this.fillBoardSquare(this.mergeGraphics, cell));
       },
       onComplete: () => this.mergeGraphics.clear(),
     });
@@ -648,10 +661,10 @@ class DarixScene extends Phaser.Scene {
   }
 
   private cancelScoreFlights(): void {
-    for (const flight of this.scoreFlights) {
-      flight.animation.cancel();
-      flight.element.remove();
-    }
+    this.scoreFlights.forEach(({ animation, element }) => {
+      animation.cancel();
+      element.remove();
+    });
     this.scoreFlights = [];
   }
 
@@ -669,11 +682,9 @@ class DarixScene extends Phaser.Scene {
     this.boardGraphics.fillRect(this.boardOffsetX, this.boardOffsetY, BOARD_WIDTH * this.cellSize, BOARD_HEIGHT * this.cellSize);
 
     this.boardGraphics.lineStyle(1, GRID, 0.45);
-    for (let y = 0; y < BOARD_HEIGHT; y += 1) {
-      for (let x = 0; x < BOARD_WIDTH; x += 1) {
-        this.boardGraphics.strokeRect(x * this.cellSize, y * this.cellSize, this.cellSize, this.cellSize);
-      }
-    }
+    CELLS.forEach((p) =>
+      this.boardGraphics.strokeRect(p.x * this.cellSize, p.y * this.cellSize, this.cellSize, this.cellSize),
+    );
 
     // A piece that has not merged is separate squares, never one shape. The white edge is painted
     // under the fills so it follows the outside of each square instead of ruling through it.
@@ -681,24 +692,18 @@ class DarixScene extends Phaser.Scene {
     if (!this.gameOver && !this.animating) {
       const piece = this.activePiece;
       this.boardGraphics.fillStyle(0xffffff, 0.95);
-      for (const block of piece.blocks) {
-        this.cellOutline(piece.x + block.x, piece.y + block.y, separate);
-      }
-      for (const block of piece.blocks) {
-        this.fillCell(piece.x + block.x, piece.y + block.y, piece.color, separate);
-      }
+      cellsOf(piece).forEach((p) => this.cellOutline(p.x, p.y, separate));
+      cellsOf(piece).forEach((p) => this.fillCell(p.x, p.y, piece.color, separate));
     }
 
-    for (let y = 0; y < BOARD_HEIGHT; y += 1) {
-      for (let x = 0; x < BOARD_WIDTH; x += 1) {
-        const cell = this.board[y][x];
-        if (!cell) continue;
-        // Only a merged block closes the gaps between its squares and reads as one solid form.
-        const solid = cell.merged === true;
-        this.fillCell(x, y, cell.color, (dx, dy) =>
-          solid && this.board[y + dy]?.[x + dx]?.group === cell.group);
-      }
-    }
+    // Only a merged block closes the gaps between its squares and reads as one solid form.
+    occupiedCells(this.board).forEach((p) => {
+      const cell = at(this.board, p)!;
+      const solid = cell.merged === true;
+      this.fillCell(p.x, p.y, cell.color, (dx, dy) =>
+        solid && peek(this.board, { x: p.x + dx, y: p.y + dy })?.group === cell.group,
+      );
+    });
   }
 
   /** Paints one square of a shape. Squares that belong together lose the gutter between them,
@@ -728,11 +733,11 @@ class DarixScene extends Phaser.Scene {
     if (r) this.boardGraphics.fillRect(left + size - inset, top + inset, inset, inner);
     if (u) this.boardGraphics.fillRect(left + inset, top, inner, inset);
     if (d) this.boardGraphics.fillRect(left + inset, top + size - inset, inner, inset);
-    for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    JOINED_CORNERS.forEach(([dx, dy]) => {
       if (linked(dx, 0) && linked(0, dy) && linked(dx, dy)) {
         this.boardGraphics.fillRect(dx < 0 ? left : left + size - inset, dy < 0 ? top : top + size - inset, inset, inset);
       }
-    }
+    });
   }
 
   /** One square of the shape's edge, drawn the full cell with its corners rounded the same way the
@@ -793,16 +798,11 @@ class DarixScene extends Phaser.Scene {
     container.innerHTML = '';
 
     // The row with the fewest gaps is the one the player is most likely closing next.
-    let bestRow = -1;
-    let bestFilled = 0;
-    for (let y = 0; y < BOARD_HEIGHT; y += 1) {
-      const filled = this.board[y].filter((cell) => cell !== null).length;
-      if (filled > bestFilled && filled < BOARD_WIDTH) {
-        bestRow = y;
-        bestFilled = filled;
-      }
-    }
-    if (bestRow < 0) return;
+    const closable = ROWS.map((y) => ({ y, filled: this.board[y].filter((cell) => cell !== null).length })).filter(
+      (row) => row.filled < BOARD_WIDTH,
+    );
+    if (closable.length === 0) return;
+    const { filled: bestFilled } = closable.reduce((best, row) => (row.filled > best.filled ? row : best));
 
     const bar = document.createElement('div');
     bar.className = 'row-progress-bar';

@@ -197,3 +197,7 @@ On row completion the row is painted in the final colour (say red), holds, and p
 ## The speed brake is off · 2026-10-19
 
 A lock that clears nothing no longer slows the fall down (was −0.07×), so after the first clear the speed only ever climbs. The rest of the curve is untouched: 700 ms at ×1, +0.1× per clear shrinking to +0.05× at ×5, floor 120 ms. Also considered: a faster base interval and a bigger hit bonus, parked because the whole-block clear already changed how much is happening on screen.
+
+## The rules read as data flow, not index loops · 2026-10-19
+
+Asked to cut the nested row/column loops and go more functional. Settled on pure helpers over a local copy: nothing mutates an argument, helpers build the next board with `reduce`, and one shared `connectedGroups(points, linked)` flood fill backs the merge, the falling units and the clear's block claim instead of three hand-rolled ones. The renderer walks the occupied squares rather than every row and column. Also considered: fully immutable cells everywhere (purer, but more cloning and noisier around 200 squares), and swapping loops for maps while keeping the mutating style (smallest diff, least gain).
