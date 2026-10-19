@@ -1,11 +1,11 @@
 # Progress · Darix
 
 **Plan:** Merge pass implementation
-**Now:** Board model merge row-clear
+**Now:** —
 **Next:** Solid block gravity
 
 ## Steps
-- [ ] Board model merge row-clear — Merge on same-color contact, full row same color pops ← now
+- [x] Board model merge row-clear — Merge on same-color contact, full row same color pops
 - [ ] Solid block gravity — Merged pieces fall as rigid units
 - [ ] Resolve rewrite — Merge detection, row clear, scoring
 - [ ] Board tests rewrite — New rules: merge, row-clear, solid fall

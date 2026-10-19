@@ -5,8 +5,8 @@ import {
   POINTS_PER_SQUARE,
   ActivePiece,
   Board,
-  DestroyedCell,
-  RecoloredRow,
+  ClearedRow,
+  Point,
   SHAPES,
   canPlace,
   createEmptyBoard,
@@ -320,34 +320,30 @@ class DarixScene extends Phaser.Scene {
   }
 
   private lockActivePiece(): void {
-    const cells = this.activePiece.blocks.map((block) => ({
-      x: this.activePiece.x + block.x,
-      y: this.activePiece.y + block.y,
-    }));
     const locked = lockPiece(this.board, this.activePiece);
-    const result = resolveLock(locked, this.board, cells);
+    const result = resolveLock(locked, this.activePiece);
     this.board = result.board;
-    this.multiplier = nextMultiplier(this.multiplier, result.sameColorDestroyed);
+    this.multiplier = nextMultiplier(this.multiplier, result.hit);
     const pointsPerSquare = POINTS_PER_SQUARE * this.multiplier;
-    this.score += result.destroyed * pointsPerSquare;
+    const mergeBonus = result.mergedSquaresDestroyed * this.multiplier;
+    this.score += result.destroyed * pointsPerSquare + mergeBonus;
     if (this.score > this.bestScore) {
       this.bestScore = this.score;
       saveBestScore(this.bestScore);
     }
-    this.updateMultiplier(result.sameColorDestroyed);
+    this.updateMultiplier(result.hit);
     const previousSpeed = this.speed;
     this.speed = nextSpeed(this.speed, result.hit);
     this.updateSpeed(Math.sign(this.speed - previousSpeed));
     this.playSfx(result.destroyed > 0 ? 'clear-combo' : 'button');
     if (this.speed > FAST_MUSIC_SPEED) this.playMusic('game-loop2');
     else if (this.speed <= CALM_MUSIC_SPEED) this.playMusic('game-loop1');
-    this.sweepRows(result.recoloredRows);
+    this.sweepRows(result.clearedRows);
     this.sendScoreParticles(result.destroyedCells, pointsPerSquare);
-    this.shatterLoosened(result.loosenedCells);
     this.spawnPiece();
   }
 
-  private sendScoreParticles(destroyedCells: DestroyedCell[], pointsPerSquare: number): void {
+  private sendScoreParticles(destroyedCells: Array<Point & { color: number }>, pointsPerSquare: number): void {
     if (destroyedCells.length === 0) return;
 
     const scoreElement = document.querySelector<HTMLElement>('#score');
@@ -441,14 +437,11 @@ class DarixScene extends Phaser.Scene {
     button.setAttribute('aria-label', this.muted ? 'Unmute sound' : 'Mute sound');
   }
 
-  /** Sweeps the new color across each completed row so the recolor is easy to follow. */
-  private sweepRows(rows: RecoloredRow[]): void {
-    for (const { y, color, cells } of rows) {
-      if (cells.length === 0) continue;
-      const first = Math.min(...cells.map((cell) => cell.x));
-      const last = Math.max(...cells.map((cell) => cell.x));
-      const width = (last - first + 1) * this.cellSize;
-      const bar = this.add.rectangle(first * this.cellSize, y * this.cellSize + this.cellSize / 2, width, this.cellSize, COLORS[color % COLORS.length], 0.9)
+  /** Sweeps the new color across each completed row so the clear is easy to follow. */
+  private sweepRows(rows: ClearedRow[]): void {
+    for (const { y, color } of rows) {
+      const width = BOARD_WIDTH * this.cellSize;
+      const bar = this.add.rectangle(0, y * this.cellSize + this.cellSize / 2, width, this.cellSize, COLORS[color % COLORS.length], 0.9)
         .setOrigin(0, 0.5)
         .setDepth(4)
         .setScale(0, 1)
@@ -460,41 +453,6 @@ class DarixScene extends Phaser.Scene {
           { alpha: 0, scaleY: 1.6, duration: 320, ease: 'Quad.In', onComplete: () => bar.destroy() },
         ],
       });
-    }
-  }
-
-  /** Flash each square of a piece that just broke apart and throw off a few shards so the break reads clearly. */
-  private shatterLoosened(loosenedCells: DestroyedCell[]): void {
-    const size = this.cellSize;
-    for (const cell of loosenedCells) {
-      const centerX = cell.x * size + size / 2;
-      const centerY = cell.y * size + size / 2;
-      const flash = this.add.rectangle(centerX, centerY, size - 4, size - 4, 0xffffff, 0.85).setDepth(5);
-      this.tweens.add({
-        targets: flash,
-        alpha: 0,
-        scale: 1.35,
-        duration: 260,
-        ease: 'Quad.Out',
-        onComplete: () => flash.destroy(),
-      });
-
-      for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-        const shard = this.add.rectangle(centerX + dx * 6, centerY + dy * 6, 8, 8, COLORS[cell.color % COLORS.length])
-          .setDepth(5)
-          .setStrokeStyle(1, 0xffffff, 0.6);
-        this.tweens.add({
-          targets: shard,
-          x: shard.x + dx * Phaser.Math.Between(10, 16),
-          y: shard.y + dy * Phaser.Math.Between(10, 16),
-          angle: Phaser.Math.Between(-120, 120),
-          alpha: 0,
-          scale: 0.4,
-          duration: 420,
-          ease: 'Cubic.Out',
-          onComplete: () => shard.destroy(),
-        });
-      }
     }
   }
 

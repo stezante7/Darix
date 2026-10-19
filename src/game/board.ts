@@ -98,7 +98,8 @@ function mergeSameColor(board: Board, piece: ActivePiece): number {
   const toMerge: Point[] = [];
   for (const pt of locked) {
     if (visited.has(key(pt.x, pt.y))) continue;
-    if (!board[pt.y]?.[pt.x] || board[pt.y][pt.x].color !== color) continue;
+    const cell = board[pt.y]?.[pt.x];
+    if (!cell || cell.color !== color) continue;
 
     toMerge.push(pt);
     visited.add(key(pt.x, pt.y));
@@ -122,7 +123,8 @@ function mergeSameColor(board: Board, piece: ActivePiece): number {
   const group = board[locked[0].y]?.[locked[0].x]?.group;
   if (group === undefined) return 0;
   for (const pt of toMerge) {
-    board[pt.y][pt.x].group = group;
+    const cell = board[pt.y]?.[pt.x];
+    if (cell) cell.group = group;
   }
 
   return toMerge.length - piece.blocks.length;

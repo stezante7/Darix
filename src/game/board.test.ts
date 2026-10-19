@@ -92,7 +92,7 @@ describe('merge on same-color contact', () => {
     // 2 board squares merged with the 4-piece block = 6 total in one group.
     expect(result.mergedSquaresDestroyed).toBe(0); // no row cleared, merge happened
     // Count cells with the merged group on the result board (after gravity).
-    const group = locked[18][3].group; // group ID from before merge
+    const group = locked[18][3]!.group; // group ID from before merge
     let groupCount = 0;
     for (let y = 0; y < BOARD_HEIGHT; y++)
       for (let x = 0; x < BOARD_WIDTH; x++)
@@ -110,7 +110,7 @@ describe('merge on same-color contact', () => {
     const result = resolveLock(locked, piece);
     expect(result.mergedSquaresDestroyed).toBe(0);
     // Piece group on result board should only cover piece cells (4 cells).
-    const group = locked[18][3].group;
+    const group = locked[18][3]!.group;
     let groupCount = 0;
     for (let y = 0; y < BOARD_HEIGHT; y++)
       for (let x = 0; x < BOARD_WIDTH; x++)
@@ -131,7 +131,7 @@ describe('merge on same-color contact', () => {
     const result = resolveLock(locked, piece);
     // 1 board square merged with 4-piece block.
     expect(result.mergedSquaresDestroyed).toBe(0); // no row cleared
-    const group = locked[18][3].group;
+    const group = locked[18][3]!.group;
     let groupCount = 0;
     for (let y = 0; y < BOARD_HEIGHT; y++)
       for (let x = 0; x < BOARD_WIDTH; x++)
@@ -201,29 +201,18 @@ describe('monochrome row clear', () => {
   });
 
   it('counts merged squares in a cleared row', () => {
+    // Fill row 18 with color 1. Place an O piece above it that will merge.
     const board = createEmptyBoard();
-    // Fill row 19 with 9 same-color squares + 1 different.
-    for (let x = 0; x < 9; x++) setCells(board, [[x, 19, 1]]);
-    setCells(board, [[9, 19, 2]]);
-    const piece = createPiece(0, 1);
+    for (let x = 0; x < BOARD_WIDTH; x++) setCells(board, [[x, 18, 1]]);
+    // Lock an O piece at x=3, y=16 → covers (3,16),(4,16),(3,17),(4,17).
+    // Its squares at (3,17),(4,17) touch row 18 squares at (3,18),(4,18).
+    // Flood fill merges row 18 into the piece's group. Row 18 clears.
+    const piece = createPiece(1, 1);
     piece.x = 3;
-    piece.y = 18;
-    // This piece merges with the same-color squares.
+    piece.y = 16;
     const result = setPiece(board, piece);
-    // The row is NOT cleared (color 2 at x=9), but merge still happens.
-    expect(result.mergedSquaresDestroyed).toBe(0);
-
-    // Now make the row monochrome by merging the last square.
-    const board2 = createEmptyBoard();
-    for (let x = 0; x < 9; x++) setCells(board2, [[x, 19, 1]]);
-    // Place a piece that merges the last square into the group.
-    const piece2 = createPiece(0, 1);
-    // Position so piece covers x=8,9 at y=18 — the square at x=8 merges.
-    piece2.x = 3;
-    piece2.y = 17;
-    const result2 = setPiece(board2, piece2);
-    // Row 19 is still not monochrome (the piece doesn't reach row 19).
-    // But the merged piece at row 18 shares color. Let me set up a proper test.
+    expect(result.hit).toBe(true);
+    expect(result.mergedSquaresDestroyed).toBe(BOARD_WIDTH);
   });
 });
 
@@ -271,18 +260,18 @@ describe('solid block gravity', () => {
     const board = createEmptyBoard();
     // Place a merged 2×2 piece at row 16 with empty space below.
     setCells(board, [[0, 16, 1], [1, 16, 1], [0, 17, 1], [1, 17, 1]]);
-    board[16][0].group = 1;
-    board[17][0].group = 1;
-    board[16][1].group = 1;
-    board[17][1].group = 1;
+    board[16][0]!.group = 1;
+    board[17][0]!.group = 1;
+    board[16][1]!.group = 1;
+    board[17][1]!.group = 1;
     const result = applyGravity(board);
     // The 2×2 piece falls as a rigid unit to the floor.
     expect(result[18][0]).not.toBe(null);
     expect(result[18][1]).not.toBe(null);
     expect(result[19][0]).not.toBe(null);
     expect(result[19][1]).not.toBe(null);
-    expect(result[18][0]?.group).toBe(1);
-    expect(result[19][1]?.group).toBe(1);
+    expect(result[18][0]!.group).toBe(1);
+    expect(result[19][1]!.group).toBe(1);
   });
 
   it('drops loose squares individually', () => {
@@ -290,8 +279,8 @@ describe('solid block gravity', () => {
     setCells(board, [[0, 18, 1]]);
     setCells(board, [[1, 18, 1]]);
     // No group — these are loose.
-    delete board[18][0].group;
-    delete board[18][1].group;
+    delete board[18][0]!.group;
+    delete board[18][1]!.group;
     const result = applyGravity(board);
     expect(result[19][0]).not.toBe(null);
     expect(result[19][1]).not.toBe(null);
@@ -300,10 +289,11 @@ describe('solid block gravity', () => {
   it('stops a falling piece on the board floor', () => {
     const board = createEmptyBoard();
     setCells(board, [[0, 19, 1]]);
-    board[19][0].group = 1;
+    board[19][0]!.group = 1;
     setCells(board, [[1, 19, 1]]);
-    board[19][1].group = 1;
+    board[19][1]!.group = 1;
     const result = applyGravity(board);
+    // Already on floor — stays put.
     expect(result[19][0]).not.toBe(null);
     expect(result[19][1]).not.toBe(null);
   });
