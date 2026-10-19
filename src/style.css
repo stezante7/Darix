@@ -142,6 +142,11 @@ body {
   border: 2px solid #ffffffcc;
   box-shadow: inset 0 1px 0 #ffffff60, 0 2px 5px #0005;
 }
+.preview-empty {
+  background: #17171760;
+  border-color: #ffffff20;
+  box-shadow: none;
+}
 
 .mute-toggle {
   align-self: flex-start;
@@ -257,6 +262,7 @@ body {
     min-height: 24px;
   }
   .preview-cell { border-radius: 2px; font-size: 7px; border: 1px solid #ffffffcc; }
+  .preview-empty { background: #17171760; border-color: #ffffff20; box-shadow: none; }
   .mute-toggle { grid-area: mute; align-self: center; padding: 0.25rem 0.35rem; font-size: 0.85rem; }
 }
 

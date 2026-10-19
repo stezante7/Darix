@@ -18,7 +18,7 @@ import {
 import { pieceColor } from './game/colors';
 import { MIN_SPEED, dropIntervalForSpeed, nextSpeed } from './game/speed';
 import { nextMultiplier } from './game/multiplier';
-import { getPiecePreview } from './game/preview';
+import { getPiecePreview, PREVIEW_HEIGHT, PREVIEW_WIDTH } from './game/preview';
 import './style.css';
 
 // Lets the game install as an app and run offline. Skipped in dev so it never caches Vite's dev server.
@@ -307,15 +307,27 @@ class DarixScene extends Phaser.Scene {
     const preview = document.querySelector<HTMLDivElement>('#next-piece-preview');
     if (!preview) return;
 
+    // Build a set of occupied cells for quick lookup
+    const occupied = new Set(getPiecePreview(this.nextPiece).map((c) => `${c.x},${c.y}`));
+
     preview.replaceChildren();
-    for (const cell of getPiecePreview(this.nextPiece)) {
-      const tile = document.createElement('span');
-      tile.className = 'preview-cell';
-      tile.style.gridColumn = String(cell.x + 1);
-      tile.style.gridRow = String(cell.y + 1);
-      tile.style.backgroundColor = `#${COLORS[cell.color % COLORS.length].toString(16).padStart(6, '0')}`;
-      tile.setAttribute('aria-hidden', 'true');
-      preview.append(tile);
+    for (let y = 0; y < PREVIEW_HEIGHT; y += 1) {
+      for (let x = 0; x < PREVIEW_WIDTH; x += 1) {
+        const tile = document.createElement('span');
+        tile.style.gridColumn = String(x + 1);
+        tile.style.gridRow = String(y + 1);
+        tile.setAttribute('aria-hidden', 'true');
+        const key = `${x},${y}`;
+        if (occupied.has(key)) {
+          tile.className = 'preview-cell';
+          const cell = getPiecePreview(this.nextPiece).find((c) => c.x === x && c.y === y)!;
+          // Slightly darken for contrast with the border
+          tile.style.backgroundColor = `#${this.darkerColor(COLORS[cell.color % COLORS.length], 0.82).toString(16).padStart(6, '0')}`;
+        } else {
+          tile.className = 'preview-cell preview-empty';
+        }
+        preview.append(tile);
+      }
     }
   }
 
