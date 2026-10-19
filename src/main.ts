@@ -29,6 +29,9 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
 }
 
 const COLORS = [0xf97316, 0x22d3ee, 0xa78bfa, 0xf43f5e, 0x84cc16, 0xfacc15];
+const SHAPE_INSET = 2;
+const CORNER_RADIUS = 5;
+
 const TITLE_COLORS = [0xf97316, 0xfacc15, 0x22d3ee, 0xa78bfa, 0xf43f5e];
 const BACKGROUND = 0x262626;
 const GRID = 0x404040;
@@ -338,18 +341,13 @@ class DarixScene extends Phaser.Scene {
 
   private lockActivePiece(): void {
     const locked = lockPiece(this.board, this.activePiece);
-    const result = resolveLock(locked, this.activePiece);
+    const result = resolveLock(locked);
     this.board = result.board;
     this.multiplier = nextMultiplier(this.multiplier, result.hit);
     const pointsPerSquare = POINTS_PER_SQUARE * this.multiplier;
-    const mergeBonus = result.mergedSquaresDestroyed * this.multiplier;
+    const mergeBonus = result.mergedSquares * this.multiplier;
     this.score += result.destroyed * pointsPerSquare + mergeBonus;
-    // Track merged squares for HUD
-    this.mergeCount += result.mergedSquaresDestroyed;
-    if (result.hit) {
-      // Reset merge count after row clear
-      this.mergeCount = 0;
-    }
+    this.mergeCount += result.mergedSquares;
     if (this.score > this.bestScore) {
       this.bestScore = this.score;
       saveBestScore(this.bestScore);
@@ -358,7 +356,7 @@ class DarixScene extends Phaser.Scene {
     const previousSpeed = this.speed;
     this.speed = nextSpeed(this.speed, result.hit);
     this.updateSpeed(Math.sign(this.speed - previousSpeed));
-    if (result.mergedSquaresDestroyed > 0) this.playSfx('bubble-pop');
+    if (result.mergedSquares > 0) this.playSfx('bubble-pop');
     this.playSfx(result.destroyed > 0 ? 'clear-combo' : 'button');
     if (this.speed > FAST_MUSIC_SPEED) this.playMusic('game-loop2');
     else if (this.speed <= CALM_MUSIC_SPEED) this.playMusic('game-loop1');
@@ -503,52 +501,57 @@ class DarixScene extends Phaser.Scene {
     this.boardGraphics.fillStyle(BACKGROUND, 1);
     this.boardGraphics.fillRect(this.boardOffsetX, this.boardOffsetY, BOARD_WIDTH * this.cellSize, BOARD_HEIGHT * this.cellSize);
 
+    this.boardGraphics.lineStyle(1, GRID, 0.45);
     for (let y = 0; y < BOARD_HEIGHT; y += 1) {
       for (let x = 0; x < BOARD_WIDTH; x += 1) {
-        this.boardGraphics.lineStyle(1, GRID, 0.9);
         this.boardGraphics.strokeRect(x * this.cellSize, y * this.cellSize, this.cellSize, this.cellSize);
       }
     }
 
-    // Board cells with visible outlines
+    // The falling piece gets a white edge. It is painted as one silhouette under its fills, so the
+    // border follows the outside of the shape instead of ruling every square inside it.
+    if (!this.gameOver) {
+      const piece = this.activePiece;
+      this.boardGraphics.fillStyle(0xffffff, 0.95);
+      for (const block of piece.blocks) {
+        this.cellOutline(piece.x + block.x, piece.y + block.y, this.pieceLink(piece, block));
+      }
+      for (const block of piece.blocks) {
+        this.fillCell(piece.x + block.x, piece.y + block.y, piece.color, this.pieceLink(piece, block));
+      }
+    }
+
     for (let y = 0; y < BOARD_HEIGHT; y += 1) {
       for (let x = 0; x < BOARD_WIDTH; x += 1) {
         const cell = this.board[y][x];
         if (!cell) continue;
-        this.drawCell(x, y, cell.color, (dx, dy) =>
-          cell.group !== undefined && this.board[y + dy]?.[x + dx]?.group === cell.group, !!cell.group);
-      }
-    }
-
-    if (!this.gameOver) {
-      const piece = this.activePiece;
-      for (const block of piece.blocks) {
-        this.drawCell(piece.x + block.x, piece.y + block.y, piece.color, (dx, dy) =>
-          piece.blocks.some((other) => other.x === block.x + dx && other.y === block.y + dy), false, true);
+        this.fillCell(x, y, cell.color, (dx, dy) =>
+          cell.group !== undefined && this.board[y + dy]?.[x + dx]?.group === cell.group);
       }
     }
   }
 
-  /** Draws one square; `linked(dx, dy)` says whether the neighbour at that offset belongs to the same piece.
-   *  `merged` means this square belongs to a merged group — draw as solid block with outline.
-   *  `active` means this square belongs to the falling piece — draw with highlight. */
-  private drawCell(
+  /** Whether a block of the falling piece has a neighbour of the same piece at that offset. */
+  private pieceLink(piece: ActivePiece, block: Point): (dx: number, dy: number) => boolean {
+    return (dx, dy) => piece.blocks.some((other) => other.x === block.x + dx && other.y === block.y + dy);
+  }
+
+  /** Paints one square of a shape. Squares that belong together lose the gutter between them,
+   *  so a piece or merged block reads as one solid form with one outline. */
+  private fillCell(
     x: number,
     y: number,
     colorIndex: number,
     linked: (dx: number, dy: number) => boolean,
-    merged = false,
-    active = false,
   ): void {
     const size = this.cellSize;
-    const inset = 2;
+    const inset = SHAPE_INSET;
     const inner = size - inset * 2;
     const left = x * size;
     const top = y * size;
     const [l, r, u, d] = [linked(-1, 0), linked(1, 0), linked(0, -1), linked(0, 1)];
-    const radius = (joined: boolean) => (joined ? 0 : 5);
-    const color = merged ? this.darkerColor(COLORS[colorIndex % COLORS.length], 0.75) : COLORS[colorIndex % COLORS.length];
-    this.boardGraphics.fillStyle(color, 1);
+    const radius = (joined: boolean) => (joined ? 0 : CORNER_RADIUS);
+    this.boardGraphics.fillStyle(COLORS[colorIndex % COLORS.length], 1);
     this.boardGraphics.fillRoundedRect(left + inset, top + inset, inner, inner, {
       tl: radius(l || u),
       tr: radius(r || u),
@@ -565,11 +568,22 @@ class DarixScene extends Phaser.Scene {
         this.boardGraphics.fillRect(dx < 0 ? left : left + size - inset, dy < 0 ? top : top + size - inset, inset, inset);
       }
     }
-    // Visible outline
-    const outlineColor = active ? 0xffffff : merged ? 0x000000 : 0xffffff;
-    const outlineWidth = active ? 3 : merged ? 2 : 1;
-    this.boardGraphics.lineStyle(outlineWidth, outlineColor, active ? 1 : merged ? 0.4 : 0.6);
-    this.boardGraphics.strokeRect(left + inset - outlineWidth / 2, top + inset - outlineWidth / 2, inner + outlineWidth, inner + outlineWidth);
+  }
+
+  /** One square of the shape's edge, drawn the full cell with its corners rounded the same way the
+   *  fills are. Tiled across the shape it becomes a single outline that only runs around the outside. */
+  private cellOutline(x: number, y: number, linked: (dx: number, dy: number) => boolean): void {
+    const size = this.cellSize;
+    const left = x * size;
+    const top = y * size;
+    const [l, r, u, d] = [linked(-1, 0), linked(1, 0), linked(0, -1), linked(0, 1)];
+    const radius = (joined: boolean) => (joined ? 0 : CORNER_RADIUS + SHAPE_INSET);
+    this.boardGraphics.fillRoundedRect(left, top, size, size, {
+      tl: radius(l || u),
+      tr: radius(r || u),
+      bl: radius(l || d),
+      br: radius(r || d),
+    });
   }
 
   /** Darken a colour by a given factor. */

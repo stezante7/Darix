@@ -1,7 +1,8 @@
 # Progress · Darix
 
 **Plan:** Merge pass implementation
-**Now:** README and tagline (Ste's turn)
+**Status:** ✅ COMPLETE
+**Now:** —
 **Next:** —
 
 ## Steps
@@ -13,7 +14,7 @@
 - [x] Preview piece shape — Show next piece shape and color
 - [x] HUD row-clear hint — Show merged count, row-progress indicator
 - [x] Sound effects — Merge click, row clear boom, game over sting
-- [ ] README and tagline — Update How it plays for merge rules ← now
+- [x] README and tagline — Update How it plays for merge rules
 
 ## Loose ends
 - None yet
