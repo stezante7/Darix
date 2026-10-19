@@ -93,6 +93,7 @@ class DarixScene extends Phaser.Scene {
   private dropTimer = 0;
   private started = false;
   private gameOver = false;
+  private mergeCount = 0; // squares merged since last row clear
   private readonly cellSize = 32;
   private readonly boardOffsetX = 0;
   private readonly boardOffsetY = 0;
@@ -184,6 +185,8 @@ class DarixScene extends Phaser.Scene {
     this.updateScore();
     this.updateMultiplier();
     this.updateSpeed();
+    this.updateMergeHUD();
+    this.updateRowProgress();
     this.draw();
     this.tweens.add({ targets: this.splashTitle, scale: 1, alpha: 1, duration: 500, ease: 'Back.Out' });
   }
@@ -278,6 +281,8 @@ class DarixScene extends Phaser.Scene {
     this.updateScore();
     this.updateMultiplier();
     this.updateSpeed();
+    this.updateMergeHUD();
+    this.updateRowProgress();
     this.draw();
     this.playSfx('button');
     this.playMusic('game-loop1');
@@ -339,6 +344,12 @@ class DarixScene extends Phaser.Scene {
     const pointsPerSquare = POINTS_PER_SQUARE * this.multiplier;
     const mergeBonus = result.mergedSquaresDestroyed * this.multiplier;
     this.score += result.destroyed * pointsPerSquare + mergeBonus;
+    // Track merged squares for HUD
+    this.mergeCount += result.mergedSquaresDestroyed;
+    if (result.hit) {
+      // Reset merge count after row clear
+      this.mergeCount = 0;
+    }
     if (this.score > this.bestScore) {
       this.bestScore = this.score;
       saveBestScore(this.bestScore);
@@ -352,6 +363,8 @@ class DarixScene extends Phaser.Scene {
     else if (this.speed <= CALM_MUSIC_SPEED) this.playMusic('game-loop1');
     this.sweepRows(result.clearedRows);
     this.sendScoreParticles(result.destroyedCells, pointsPerSquare);
+    this.updateMergeHUD();
+    this.updateRowProgress();
     this.spawnPiece();
   }
 
@@ -591,6 +604,72 @@ class DarixScene extends Phaser.Scene {
       void multiplierElement.offsetWidth;
       multiplierElement.classList.add('multiplier-pop');
     }
+  }
+
+  private updateMergeHUD(): void {
+    const element = document.querySelector<HTMLElement>('#merge-count');
+    if (!element) return;
+    element.textContent = String(this.mergeCount);
+  }
+
+  private updateRowProgress(): void {
+    const container = document.querySelector<HTMLElement>('#row-progress');
+    if (!container) return;
+    container.innerHTML = '';
+
+    // Find the top-most filled row and its color
+    let topRow = -1;
+    let topColor = -1;
+    for (let y = 0; y < BOARD_HEIGHT; y += 1) {
+      let color = -1;
+      let filled = 0;
+      for (let x = 0; x < BOARD_WIDTH; x += 1) {
+        const cell = this.board[y][x];
+        if (cell) {
+          if (color === -1) color = cell.color;
+          else if (cell.color === color) filled++;
+          else { color = -1; break; }
+        }
+      }
+      if (color >= 0 && filled === BOARD_WIDTH) {
+        topRow = y;
+        topColor = color;
+        break;
+      }
+      // Also count consecutive same-color cells from the top
+      if (color >= 0 && filled > 0 && filled < BOARD_WIDTH) {
+        topRow = y;
+        topColor = color;
+        break;
+      }
+    }
+
+    if (topRow < 0 || topColor < 0) {
+      // No progress to show
+      return;
+    }
+
+    // Count how many cells in this row have the top color
+    let progress = 0;
+    for (let x = 0; x < BOARD_WIDTH; x += 1) {
+      if (this.board[topRow][x]?.color === topColor) progress++;
+    }
+
+    // Show progress as a bar
+    const bar = document.createElement('div');
+    bar.className = 'row-progress-bar';
+    const fill = document.createElement('div');
+    fill.className = 'row-progress-fill';
+    fill.style.width = `${(progress / BOARD_WIDTH) * 100}%`;
+    fill.style.backgroundColor = `#${COLORS[topColor % COLORS.length].toString(16).padStart(6, '0')}`;
+    bar.appendChild(fill);
+    container.appendChild(bar);
+
+    // Show progress text
+    const text = document.createElement('span');
+    text.style.cssText = 'color: #a3a3a3; font-size: 0.65rem; font-family: monospace; margin-left: 4px;';
+    text.textContent = `${progress}/${BOARD_WIDTH}`;
+    container.appendChild(text);
   }
 
 }
