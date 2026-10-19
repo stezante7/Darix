@@ -155,7 +155,7 @@ class DarixScene extends Phaser.Scene {
     this.splashOverlay = this.add.container(0, 0, [
       this.add.rectangle(centerX, centerY, BOARD_WIDTH * this.cellSize, BOARD_HEIGHT * this.cellSize, 0x111827, 0.68),
       this.splashTitle,
-      this.add.text(centerX, centerY - 20, 'MATCH FOUR OF A COLOUR', {
+      this.add.text(centerX, centerY - 20, 'MERGE. CLEAR. OUTLAST.', {
         align: 'center',
         color: '#22d3ee',
         fontFamily: 'Arial Black, sans-serif',

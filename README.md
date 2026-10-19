@@ -2,7 +2,7 @@
 
 [![Build and deploy](https://github.com/stezante7/Darix/actions/workflows/deploy.yml/badge.svg)](https://github.com/stezante7/Darix/actions/workflows/deploy.yml)
 
-A falling-block puzzle game where you match colours instead of clearing lines.
+A falling-block puzzle game where you merge pieces and clear rows.
 
 <img src="screenshot.png" alt="Darix in play: score, multiplier, speed and next piece on the left, the board with coloured pieces on the right" width="360">
 
@@ -13,12 +13,10 @@ On a phone, use your browser's "Install app" or "Add to Home screen" to get it a
 ## How it plays
 
 - Every piece is one colour. Rotating it cycles to the next colour, so you choose what it matches.
-- When a piece lands, it pops every connected group of **four or more squares of one colour** it touches — its own squares don't count towards the four, so a piece can never clear itself.
-- A piece keeps its shape until it takes part in a pop. Then it breaks into loose squares that fall on their own; intact pieces fall rigidly.
-- Falls can chain: if a falling square lands next to its own colour for the first time and the merged group reaches four, that pops too.
-- Completing a row paints the run the piece touched with its colour, which then pops as one bigger group.
-- Pops on consecutive drops build your multiplier.
-- Hits speed the game up, misses slow it down.
+- When a piece lands, any squares of the same colour touching it **merge** into a single solid block.
+- A full row of one colour **clears** — squares vanish and blocks above fall as rigid units.
+- Merged pieces score a bonus on top of the per-square points.
+- Consecutive clears build your multiplier. Hits speed the game up, misses slow it down.
 
 ## Controls
 
