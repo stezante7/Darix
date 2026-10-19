@@ -126,6 +126,9 @@ body {
   gap: 3px;
   min-width: 81px;
   min-height: 39px;
+  background: #17171740;
+  border-radius: 6px;
+  padding: 3px;
 }
 
 .preview-cell {
@@ -136,6 +139,7 @@ body {
   font-family: 'Arial Black', sans-serif;
   font-size: 10px;
   line-height: 1;
+  border: 2px solid #ffffffcc;
   box-shadow: inset 0 1px 0 #ffffff60, 0 2px 5px #0005;
 }
 
@@ -252,7 +256,7 @@ body {
     min-width: 50px;
     min-height: 24px;
   }
-  .preview-cell { border-radius: 2px; font-size: 7px; }
+  .preview-cell { border-radius: 2px; font-size: 7px; border: 1px solid #ffffffcc; }
   .mute-toggle { grid-area: mute; align-self: center; padding: 0.25rem 0.35rem; font-size: 0.85rem; }
 }
 

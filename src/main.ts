@@ -484,14 +484,13 @@ class DarixScene extends Phaser.Scene {
       }
     }
 
-    // Squares of the same intact piece join into one solid shape (colors meet at a clean edge);
-    // loose squares stay separate tiles.
+    // Board cells with visible outlines
     for (let y = 0; y < BOARD_HEIGHT; y += 1) {
       for (let x = 0; x < BOARD_WIDTH; x += 1) {
         const cell = this.board[y][x];
         if (!cell) continue;
         this.drawCell(x, y, cell.color, (dx, dy) =>
-          cell.group !== undefined && this.board[y + dy]?.[x + dx]?.group === cell.group);
+          cell.group !== undefined && this.board[y + dy]?.[x + dx]?.group === cell.group, !!cell.group);
       }
     }
 
@@ -499,17 +498,21 @@ class DarixScene extends Phaser.Scene {
       const piece = this.activePiece;
       for (const block of piece.blocks) {
         this.drawCell(piece.x + block.x, piece.y + block.y, piece.color, (dx, dy) =>
-          piece.blocks.some((other) => other.x === block.x + dx && other.y === block.y + dy));
+          piece.blocks.some((other) => other.x === block.x + dx && other.y === block.y + dy), false, true);
       }
     }
   }
 
-  /** Draws one square; `linked(dx, dy)` says whether the neighbour at that offset belongs to the same piece. */
+  /** Draws one square; `linked(dx, dy)` says whether the neighbour at that offset belongs to the same piece.
+   *  `merged` means this square belongs to a merged group — draw as solid block with outline.
+   *  `active` means this square belongs to the falling piece — draw with highlight. */
   private drawCell(
     x: number,
     y: number,
     colorIndex: number,
     linked: (dx: number, dy: number) => boolean,
+    merged = false,
+    active = false,
   ): void {
     const size = this.cellSize;
     const inset = 2;
@@ -518,7 +521,8 @@ class DarixScene extends Phaser.Scene {
     const top = y * size;
     const [l, r, u, d] = [linked(-1, 0), linked(1, 0), linked(0, -1), linked(0, 1)];
     const radius = (joined: boolean) => (joined ? 0 : 5);
-    this.boardGraphics.fillStyle(COLORS[colorIndex % COLORS.length], 1);
+    const color = merged ? this.darkerColor(COLORS[colorIndex % COLORS.length], 0.75) : COLORS[colorIndex % COLORS.length];
+    this.boardGraphics.fillStyle(color, 1);
     this.boardGraphics.fillRoundedRect(left + inset, top + inset, inner, inner, {
       tl: radius(l || u),
       tr: radius(r || u),
@@ -535,6 +539,19 @@ class DarixScene extends Phaser.Scene {
         this.boardGraphics.fillRect(dx < 0 ? left : left + size - inset, dy < 0 ? top : top + size - inset, inset, inset);
       }
     }
+    // Visible outline
+    const outlineColor = active ? 0xffffff : merged ? 0x000000 : 0xffffff;
+    const outlineWidth = active ? 3 : merged ? 2 : 1;
+    this.boardGraphics.lineStyle(outlineWidth, outlineColor, active ? 1 : merged ? 0.4 : 0.6);
+    this.boardGraphics.strokeRect(left + inset - outlineWidth / 2, top + inset - outlineWidth / 2, inner + outlineWidth, inner + outlineWidth);
+  }
+
+  /** Darken a colour by a given factor. */
+  private darkerColor(rgb: number, factor: number): number {
+    const r = ((rgb >> 16) & 0xff) * factor | 0;
+    const g = ((rgb >> 8) & 0xff) * factor | 0;
+    const b = (rgb & 0xff) * factor | 0;
+    return (r << 16) | (g << 8) | b;
   }
 
   private updateScore(): void {
