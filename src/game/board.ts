@@ -144,33 +144,40 @@ function mergeSameColor(board: Board): number {
 
 export interface ClearedRow {
   y: number;
+  /** The colour of the block that completed the row. The row is swept in it as it goes. */
   color: number;
 }
 
-/**
- * Finds all rows that are completely filled with the same color.
- * Returns them with the count of merged-square cells in each.
- */
-function findMonochromeRows(board: Board): ClearedRow[] {
-  const rows: ClearedRow[] = [];
-  for (let y = 0; y < BOARD_HEIGHT; y += 1) {
-    const row = board[y];
-    if (!row.every((cell) => cell !== null)) continue;
-    const color = row[0]?.color;
-    if (color === undefined || !row.every((cell) => cell.color === color)) continue;
+function rowIsFull(board: Board, y: number): boolean {
+  return board[y].every((cell) => cell !== null);
+}
 
-    rows.push({ y, color });
+/** Indexes of the rows that are completely full. Colours do not matter — a row goes when it is full. */
+function fullRowIndexes(board: Board): number[] {
+  const rows: number[] = [];
+  for (let y = 0; y < BOARD_HEIGHT; y += 1) {
+    if (rowIsFull(board, y)) rows.push(y);
   }
   return rows;
 }
 
-/** Removes all monochrome rows, returning their info. */
-function clearRows(board: Board, rows: ClearedRow[]): void {
-  for (const { y } of rows) {
-    for (let x = 0; x < BOARD_WIDTH; x += 1) {
-      board[y][x] = null;
-    }
+/** Removes every full row. */
+function clearRows(board: Board, rowIndexes: number[]): void {
+  for (const y of rowIndexes) {
+    for (let x = 0; x < BOARD_WIDTH; x += 1) board[y][x] = null;
   }
+}
+
+/**
+ * The colour that completed a row left full by a fall: the colour of the square that dropped into
+ * one of its holes. `beforeFalls` is the board as it was with the holes still open.
+ */
+function completingColor(board: Board, beforeFalls: Board, y: number): number {
+  for (let x = 0; x < BOARD_WIDTH; x += 1) {
+    const cell = board[y][x];
+    if (cell && beforeFalls[y][x] === null) return cell.color;
+  }
+  return board[y][0]!.color;
 }
 
 /** Squares that fall together: a loose square alone, or a connected run of squares from one intact piece. */
@@ -242,49 +249,66 @@ export function applyGravity(board: Board): Board {
 
 export interface ResolveResult {
   board: Board;
-  /** Squares removed from monochrome row clears. */
+  /** Squares removed by row clears. */
   destroyed: number;
-  /** Position and color of destroyed squares. */
+  /** Position and colour of destroyed squares. */
   destroyedCells: Array<Point & { color: number }>;
   /** Whether this lock cleared any rows. */
   hit: boolean;
-  /** Rows that were completely monochrome and cleared. */
+  /** Rows that were full and cleared. */
   clearedRows: ClearedRow[];
   /** Squares that joined another block, i.e. how much this lock merged. */
   mergedSquares: number;
 }
 
 /**
- * Resolves a locked piece:
+ * Resolves a locked piece. `lockColor` is the colour of the piece that locked, which is what a
+ * row it completed gets swept in.
  * 1. Merges same-color contact squares into one solid block.
- * 2. Clears any monochrome rows.
- * 3. Applies gravity so blocks settle, then merges anything the falls left touching.
+ * 2. Clears every full row.
+ * 3. Applies gravity so blocks settle, merging anything the falls leave touching, and clears again
+ *    — a fall that fills a row completes that row too.
  */
-export function resolveLock(board: Board): ResolveResult {
-  const resolved = cloneBoard(board);
+/** Blocks fall and, since a fall can leave two blocks touching, the board merges again. */
+function settle(board: Board): Board {
+  const settled = applyGravity(board);
+  mergeSameColor(settled);
+  return settled;
+}
+
+export function resolveLock(board: Board, lockColor: number): ResolveResult {
+  let resolved = cloneBoard(board);
 
   // Step 1: Merge same-color contacts.
   let mergedSquares = mergeSameColor(resolved);
 
-  // Step 2: Find and clear monochrome rows.
-  const clearedRows = findMonochromeRows(resolved);
-  const destroyedCells: Array<Point & { color: number }> = [];
-  for (const row of clearedRows) {
-    for (let x = 0; x < BOARD_WIDTH; x += 1) {
-      const cell = resolved[row.y][x];
-      if (cell) destroyedCells.push({ x, y: row.y, color: cell.color });
-    }
-  }
-  if (clearedRows.length > 0) {
-    clearRows(resolved, clearedRows);
-  }
+  // Step 2: everything settles, so a piece rests before its row is measured.
+  let beforeFalls = cloneBoard(resolved);
+  resolved = settle(resolved);
 
-  // Step 3: Gravity settles remaining blocks; blocks the falls left touching merge too.
-  const settled = applyGravity(resolved);
-  mergedSquares += mergeSameColor(settled);
+  // Step 3: a full row goes, whatever colours are in it. The blocks a clear leaves behind fall
+  // into the gaps and can complete another row, so this repeats until nothing is full.
+  const clearedRows: ClearedRow[] = [];
+  const destroyedCells: Array<Point & { color: number }> = [];
+  while (true) {
+    const rowIndexes = fullRowIndexes(resolved);
+    if (rowIndexes.length === 0) break;
+
+    for (const y of rowIndexes) {
+      // The lock that filled the row is the completing block. For a row filled by a fall it is
+      // whichever block dropped into its hole. The whole row takes that colour as it goes.
+      const color = rowIsFull(beforeFalls, y) ? lockColor : completingColor(resolved, beforeFalls, y);
+      clearedRows.push({ y, color });
+      for (let x = 0; x < BOARD_WIDTH; x += 1) destroyedCells.push({ x, y, color });
+    }
+
+    clearRows(resolved, rowIndexes);
+    beforeFalls = cloneBoard(resolved);
+    resolved = settle(resolved);
+  }
 
   return {
-    board: settled,
+    board: resolved,
     destroyed: destroyedCells.length,
     destroyedCells,
     hit: clearedRows.length > 0,

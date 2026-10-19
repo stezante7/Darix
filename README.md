@@ -13,9 +13,9 @@ On a phone, use your browser's "Install app" or "Add to Home screen" to get it a
 ## How it plays
 
 - Every piece is one colour. Rotating it cycles to the next colour, so you choose what it matches.
-- When a piece lands, any squares of the same colour touching it **merge** into a single solid block.
-- A full row of one colour **clears** — squares vanish and blocks above fall as rigid units.
-- Merged pieces score a bonus on top of the per-square points.
+- Squares of the same colour that touch **merge** into one solid block. A piece that has never merged is still separate squares; the block it becomes is solid.
+- Any **full row** clears, whatever colours are in it, and sweeps away in the colour of the block that completed it. Blocks above fall as rigid units, and a fall that fills another row completes that row too.
+- Merged squares score a bonus on top of the per-square points.
 - Consecutive clears build your multiplier. Hits speed the game up, misses slow it down.
 
 ## Controls

@@ -47,7 +47,7 @@ function countGroup(board: Board, group: number | undefined): number {
 
 function setPiece(board: Board, piece: ActivePiece): ResolveResult {
   const locked = lockPiece(board, piece);
-  const result = resolveLock(locked);
+  const result = resolveLock(locked, piece.color);
   return result;
 }
 
@@ -112,7 +112,7 @@ describe('merge on same-color contact', () => {
     piece.x = 3;
     piece.y = 18;
     const locked = lockPiece(board, piece);
-    const result = resolveLock(locked);
+    const result = resolveLock(locked, piece.color);
     // The two board squares joined the piece's block, so the merge is worth 2.
     expect(result.mergedSquares).toBe(2);
     expect(countGroup(result.board, locked[18][3]!.group)).toBe(6);
@@ -126,7 +126,7 @@ describe('merge on same-color contact', () => {
     piece.x = 3;
     piece.y = 18;
     const locked = lockPiece(board, piece);
-    const result = resolveLock(locked);
+    const result = resolveLock(locked, piece.color);
     // (2,18) is the same colour and joins; (7,18) is a different colour and does not.
     expect(result.mergedSquares).toBe(1);
     expect(countGroup(result.board, locked[18][3]!.group)).toBe(5);
@@ -142,7 +142,7 @@ describe('merge on same-color contact', () => {
     piece.x = 3;
     piece.y = 18;
     const locked = lockPiece(board, piece);
-    const result = resolveLock(locked);
+    const result = resolveLock(locked, piece.color);
     // 1 board square merged with the 4-piece block.
     expect(result.mergedSquares).toBe(1);
     expect(countGroup(result.board, locked[18][3]!.group)).toBe(5);
@@ -190,15 +190,33 @@ describe('monochrome row clear', () => {
     expect(result.clearedRows[0].color).toBe(1);
   });
 
-  it('does not clear a row with mixed colors', () => {
+  it('clears a full row whatever the colours, in the colour that completed it', () => {
+    // Row 19 holds eight squares of colour 1; the O piece drops into the last two and fills it.
     const board = createEmptyBoard();
-    for (let x = 0; x < BOARD_WIDTH - 1; x++) setCells(board, [[x, 19, 1]]);
-    setCells(board, [[9, 19, 2]]);
-    const piece = createPiece(0, 1);
-    piece.x = 3;
-    piece.y = 18;
+    for (let x = 0; x < 8; x++) setCells(board, [[x, 19, 1]]);
+    const piece = createPiece(1, 2);
+    piece.x = 8;
+    piece.y = 17;
     const result = setPiece(board, piece);
-    expect(result.hit).toBe(false);
+    expect(result.hit).toBe(true);
+    expect(result.destroyed).toBe(BOARD_WIDTH);
+    // The completing block is colour 2, so the whole row goes in that colour.
+    expect(result.clearedRows[0].color).toBe(2);
+  });
+
+  it('clears a row that a fall completes', () => {
+    // Row 19 has one hole at x=4 and a loose square parked above it. Nothing clears until that
+    // square drops into the hole, and then it is the loose square's colour that sweeps the row.
+    const board = createEmptyBoard();
+    for (let x = 0; x < BOARD_WIDTH; x++) if (x !== 4) setCells(board, [[x, 19, 1]]);
+    setCells(board, [[4, 17, 3]]);
+    const piece = createPiece(0, 2);
+    piece.x = 0;
+    piece.y = 0;
+    const result = setPiece(board, piece);
+    expect(result.hit).toBe(true);
+    expect(result.destroyed).toBe(BOARD_WIDTH);
+    expect(result.clearedRows[0].color).toBe(3);
   });
 
   it('does not clear a row with a null cell', () => {
@@ -332,24 +350,18 @@ describe('solid block gravity', () => {
 
 describe('resolveLock integration', () => {
   it('merges, clears rows, and applies gravity in order', () => {
-    // Build a monochrome row at y=16 with a merged piece.
+    // Two rows full of loose squares with a piece parked above them.
     const board = createEmptyBoard();
-    for (let x = 0; x < BOARD_WIDTH; x++) setCells(board, [[x, 16, 1]]);
-    // Place a merged piece above the row.
-    // Lock at x=3, y=14: I-piece covers (3,14),(4,14),(5,14),(6,14).
-    // Then fill row 15 with color 1.
-    for (let x = 0; x < BOARD_WIDTH; x++) setCells(board, [[x, 15, 1]]);
-    // Row 15 is monochrome. Lock an I-piece on row 14.
-    // The piece at row 14 doesn't touch row 15, so no merge from the lock.
-    // But row 15 is monochrome.
+    for (const y of [15, 16]) for (let x = 0; x < BOARD_WIDTH; x++) setCells(board, [[x, y, 1]]);
     const piece = createPiece(0, 1);
     piece.x = 3;
     piece.y = 14;
-    const locked = lockPiece(board, piece);
-    const result = resolveLock(locked);
-    // Row 15 should clear.
+    const result = setPiece(board, piece);
+    // Loose squares fall first, so both rows reach the bottom and clear from there.
     expect(result.hit).toBe(true);
-    expect(result.clearedRows.some((r) => r.y === 15)).toBe(true);
+    expect(result.clearedRows.map((r) => r.y)).toEqual([18, 19]);
+    // The piece drops into the space the clears made.
+    expect(result.board[19].filter((c) => c !== null).length).toBe(piece.blocks.length);
   });
 
   it('returns empty destroyed cells when nothing clears', () => {

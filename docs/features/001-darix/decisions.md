@@ -163,3 +163,17 @@ The row-run painting was part of the groups-of-4 system. Full-row clear is a sin
 ## Replaced: Only new connections pop in a chain · 2026-10-20
 
 There are no chain pops in the new system. A row clear removes a full row; blocks above fall as solid units. No falling squares re-check for groups. Also considered: chains from falling merged pieces (complex, unpredictable), and chains from falling loose squares (same problem).
+
+## A block is solid only once it has merged · 2026-10-19
+
+When the block isn't merged the pieces that form it should be separated, appearing not as a solid block — it becomes a solid block on merge. So "merged" is now a property of a block, and only merged blocks close the gaps between their squares.
+
+## Any full row clears, not only a monochrome one · 2026-10-19
+
+Replaces "Full row of same color pops". Playability: nothing ever cleared — in 164 random locks the monochrome condition was never met. A row goes when it is full, whatever colours are in it.
+
+The completing block's colour is the row's colour: the whole row is washed in it as it goes, so the sweep and the score particles read as one event. For a row filled by a fall, the completing block is whichever block dropped into its hole.
+
+## Full is full: cascades clear · 2026-10-19
+
+Replaces "Only new connections pop in a chain" / the no-re-check decision, which belonged to the groups-of-4 model. The board settles until nothing is full, so a fall that fills a hole completes that row too. Also considered: only the row the lock completed, which left a full row sitting on the board looking like a bug.

@@ -341,7 +341,7 @@ class DarixScene extends Phaser.Scene {
 
   private lockActivePiece(): void {
     const locked = lockPiece(this.board, this.activePiece);
-    const result = resolveLock(locked);
+    const result = resolveLock(locked, this.activePiece.color);
     this.board = result.board;
     this.multiplier = nextMultiplier(this.multiplier, result.hit);
     const pointsPerSquare = POINTS_PER_SQUARE * this.multiplier;
@@ -625,63 +625,35 @@ class DarixScene extends Phaser.Scene {
     element.textContent = String(this.mergeCount);
   }
 
+  /** Shows how close the nearest-to-complete row is, since a row goes when it is full. */
   private updateRowProgress(): void {
     const container = document.querySelector<HTMLElement>('#row-progress');
     if (!container) return;
     container.innerHTML = '';
 
-    // Find the top-most filled row and its color
-    let topRow = -1;
-    let topColor = -1;
+    // The row with the fewest gaps is the one the player is most likely closing next.
+    let bestRow = -1;
+    let bestFilled = 0;
     for (let y = 0; y < BOARD_HEIGHT; y += 1) {
-      let color = -1;
-      let filled = 0;
-      for (let x = 0; x < BOARD_WIDTH; x += 1) {
-        const cell = this.board[y][x];
-        if (cell) {
-          if (color === -1) color = cell.color;
-          else if (cell.color === color) filled++;
-          else { color = -1; break; }
-        }
-      }
-      if (color >= 0 && filled === BOARD_WIDTH) {
-        topRow = y;
-        topColor = color;
-        break;
-      }
-      // Also count consecutive same-color cells from the top
-      if (color >= 0 && filled > 0 && filled < BOARD_WIDTH) {
-        topRow = y;
-        topColor = color;
-        break;
+      const filled = this.board[y].filter((cell) => cell !== null).length;
+      if (filled > bestFilled && filled < BOARD_WIDTH) {
+        bestRow = y;
+        bestFilled = filled;
       }
     }
+    if (bestRow < 0) return;
 
-    if (topRow < 0 || topColor < 0) {
-      // No progress to show
-      return;
-    }
-
-    // Count how many cells in this row have the top color
-    let progress = 0;
-    for (let x = 0; x < BOARD_WIDTH; x += 1) {
-      if (this.board[topRow][x]?.color === topColor) progress++;
-    }
-
-    // Show progress as a bar
     const bar = document.createElement('div');
     bar.className = 'row-progress-bar';
     const fill = document.createElement('div');
     fill.className = 'row-progress-fill';
-    fill.style.width = `${(progress / BOARD_WIDTH) * 100}%`;
-    fill.style.backgroundColor = `#${COLORS[topColor % COLORS.length].toString(16).padStart(6, '0')}`;
+    fill.style.width = `${(bestFilled / BOARD_WIDTH) * 100}%`;
     bar.appendChild(fill);
     container.appendChild(bar);
 
-    // Show progress text
     const text = document.createElement('span');
     text.style.cssText = 'color: #a3a3a3; font-size: 0.65rem; font-family: monospace; margin-left: 4px;';
-    text.textContent = `${progress}/${BOARD_WIDTH}`;
+    text.textContent = `${bestFilled}/${BOARD_WIDTH}`;
     container.appendChild(text);
   }
 
