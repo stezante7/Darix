@@ -85,56 +85,60 @@ const DIRECTIONS: Point[] = [
 ];
 
 /**
- * When a piece locks, finds all same-color squares connected to the locked piece's
- * squares and merges them into a single solid block (one group ID).
- * Returns the count of squares added to the merge (from the board, not the piece).
+ * Merges every set of touching same-color squares into one solid block.
+ *
+ * Each connected run of one color keeps the lowest group id it already had, so the oldest
+ * piece owns the merged block. Running this over the whole board rather than only from the
+ * locked piece means two blocks that end up touching after a fall merge too — the board
+ * never shows same-color squares that are not one block.
+ * Returns how many squares changed block, which is how much the player merged.
  */
-function mergeSameColor(board: Board, piece: ActivePiece): number {
-  const locked = piece.blocks.map((b) => ({ x: piece.x + b.x, y: piece.y + b.y }));
-  const color = piece.color;
+function mergeSameColor(board: Board): number {
+  const seen = new Set<string>();
+  let absorbed = 0;
 
-  // Find all same-color squares reachable from any locked square.
-  const visited = new Set<string>();
-  const toMerge: Point[] = [];
-  for (const pt of locked) {
-    if (visited.has(key(pt.x, pt.y))) continue;
-    const cell = board[pt.y]?.[pt.x];
-    if (!cell || cell.color !== color) continue;
+  for (let y = 0; y < BOARD_HEIGHT; y += 1) {
+    for (let x = 0; x < BOARD_WIDTH; x += 1) {
+      const start = board[y][x];
+      if (!start || seen.has(key(x, y))) continue;
 
-    toMerge.push(pt);
-    visited.add(key(pt.x, pt.y));
-    for (let i = 0; i < toMerge.length; i += 1) {
-      for (const dir of DIRECTIONS) {
-        const nx = toMerge[i].x + dir.x;
-        const ny = toMerge[i].y + dir.y;
-        if (nx < 0 || nx >= BOARD_WIDTH || ny < 0 || ny >= BOARD_HEIGHT) continue;
-        if (visited.has(key(nx, ny))) continue;
-        const cell = board[ny]?.[nx];
-        if (!cell || cell.color !== color) continue;
-        visited.add(key(nx, ny));
-        toMerge.push({ x: nx, y: ny });
+      // Flood-fill this square's same-color run.
+      const run: Point[] = [{ x, y }];
+      seen.add(key(x, y));
+      for (let i = 0; i < run.length; i += 1) {
+        for (const dir of DIRECTIONS) {
+          const nx = run[i].x + dir.x;
+          const ny = run[i].y + dir.y;
+          if (nx < 0 || nx >= BOARD_WIDTH || ny < 0 || ny >= BOARD_HEIGHT) continue;
+          if (seen.has(key(nx, ny))) continue;
+          const cell = board[ny][nx];
+          if (!cell || cell.color !== start.color) continue;
+          seen.add(key(nx, ny));
+          run.push({ x: nx, y: ny });
+        }
+      }
+
+      const owner = run.reduce(
+        (lowest, pt) => Math.min(lowest, board[pt.y][pt.x]!.group ?? Infinity),
+        Infinity,
+      );
+      // A run that never belonged to a block just gets labelled; nothing was merged away.
+      if (owner === Infinity) continue;
+
+      for (const pt of run) {
+        const cell = board[pt.y][pt.x]!;
+        if (cell.group !== owner) absorbed += 1;
+        cell.group = owner;
       }
     }
   }
 
-  if (toMerge.length <= piece.blocks.length) return 0;
-
-  // Reassign all merged squares to the same group.
-  const group = board[locked[0].y]?.[locked[0].x]?.group;
-  if (group === undefined) return 0;
-  for (const pt of toMerge) {
-    const cell = board[pt.y]?.[pt.x];
-    if (cell) cell.group = group;
-  }
-
-  return toMerge.length - piece.blocks.length;
+  return absorbed;
 }
 
 export interface ClearedRow {
   y: number;
   color: number;
-  /** Count of squares in this row that belong to merged pieces. */
-  mergedSquares: number;
 }
 
 /**
@@ -149,8 +153,7 @@ function findMonochromeRows(board: Board): ClearedRow[] {
     const color = row[0]?.color;
     if (color === undefined || !row.every((cell) => cell.color === color)) continue;
 
-    const merged = row.filter((cell) => cell.group !== undefined).length;
-    rows.push({ y, color, mergedSquares: merged });
+    rows.push({ y, color });
   }
   return rows;
 }
@@ -241,52 +244,46 @@ export interface ResolveResult {
   hit: boolean;
   /** Rows that were completely monochrome and cleared. */
   clearedRows: ClearedRow[];
-  /** Number of squares from merged pieces caught in cleared rows. */
-  mergedSquaresDestroyed: number;
+  /** Squares that joined another block, i.e. how much this lock merged. */
+  mergedSquares: number;
 }
 
 /**
  * Resolves a locked piece:
  * 1. Merges same-color contact squares into one solid block.
  * 2. Clears any monochrome rows.
- * 3. Applies gravity so blocks settle.
+ * 3. Applies gravity so blocks settle, then merges anything the falls left touching.
  */
-export function resolveLock(
-  board: Board,
-  piece: ActivePiece,
-): ResolveResult {
+export function resolveLock(board: Board): ResolveResult {
   const resolved = cloneBoard(board);
 
   // Step 1: Merge same-color contacts.
-  mergeSameColor(resolved, piece);
+  let mergedSquares = mergeSameColor(resolved);
 
   // Step 2: Find and clear monochrome rows.
   const clearedRows = findMonochromeRows(resolved);
   const destroyedCells: Array<Point & { color: number }> = [];
-  let mergedSquaresDestroyed = 0;
   for (const row of clearedRows) {
     for (let x = 0; x < BOARD_WIDTH; x += 1) {
       const cell = resolved[row.y][x];
-      if (cell) {
-        destroyedCells.push({ x, y: row.y, color: cell.color });
-        if (cell.group !== undefined) mergedSquaresDestroyed += 1;
-      }
+      if (cell) destroyedCells.push({ x, y: row.y, color: cell.color });
     }
   }
   if (clearedRows.length > 0) {
     clearRows(resolved, clearedRows);
   }
 
-  // Step 3: Gravity settles remaining blocks.
-  const boardAfterGravity = applyGravity(resolved);
+  // Step 3: Gravity settles remaining blocks; blocks the falls left touching merge too.
+  const settled = applyGravity(resolved);
+  mergedSquares += mergeSameColor(settled);
 
   return {
-    board: boardAfterGravity,
+    board: settled,
     destroyed: destroyedCells.length,
     destroyedCells,
     hit: clearedRows.length > 0,
     clearedRows,
-    mergedSquaresDestroyed,
+    mergedSquares,
   };
 }
 

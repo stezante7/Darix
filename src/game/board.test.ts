@@ -21,9 +21,33 @@ function setCells(board: Board, cells: Array<[number, number, number]>) {
   for (const [x, y, color] of cells) board[y][x] = { color };
 }
 
+/** Adjacent same-color squares that are still in separate blocks. Should always be zero. */
+function strayPairs(board: Board): number {
+  let strays = 0;
+  for (let y = 0; y < BOARD_HEIGHT; y += 1) {
+    for (let x = 0; x < BOARD_WIDTH; x += 1) {
+      const cell = board[y][x];
+      if (!cell) continue;
+      for (const [dx, dy] of [[1, 0], [0, 1]] as const) {
+        const other = board[y + dy]?.[x + dx];
+        if (other && other.color === cell.color && other.group !== cell.group) strays += 1;
+      }
+    }
+  }
+  return strays;
+}
+
+function countGroup(board: Board, group: number | undefined): number {
+  let count = 0;
+  for (let y = 0; y < BOARD_HEIGHT; y += 1)
+    for (let x = 0; x < BOARD_WIDTH; x += 1)
+      if (board[y][x]?.group === group) count += 1;
+  return count;
+}
+
 function setPiece(board: Board, piece: ActivePiece): ResolveResult {
   const locked = lockPiece(board, piece);
-  const result = resolveLock(locked, piece);
+  const result = resolveLock(locked);
   return result;
 }
 
@@ -88,35 +112,25 @@ describe('merge on same-color contact', () => {
     piece.x = 3;
     piece.y = 18;
     const locked = lockPiece(board, piece);
-    const result = resolveLock(locked, piece);
-    // 2 board squares merged with the 4-piece block = 6 total in one group.
-    expect(result.mergedSquaresDestroyed).toBe(0); // no row cleared, merge happened
-    // Count cells with the merged group on the result board (after gravity).
-    const group = locked[18][3]!.group; // group ID from before merge
-    let groupCount = 0;
-    for (let y = 0; y < BOARD_HEIGHT; y++)
-      for (let x = 0; x < BOARD_WIDTH; x++)
-        if (result.board[y][x]?.group === group) groupCount++;
-    expect(groupCount).toBe(6);
+    const result = resolveLock(locked);
+    // The two board squares joined the piece's block, so the merge is worth 2.
+    expect(result.mergedSquares).toBe(2);
+    expect(countGroup(result.board, locked[18][3]!.group)).toBe(6);
+    expect(strayPairs(result.board)).toBe(0);
   });
 
-  it('does not merge when colors differ', () => {
+  it('only merges the squares that share the piece colour', () => {
     const board = createEmptyBoard();
     setCells(board, [[2, 18, 1], [7, 18, 2]]);
     const piece = createPiece(0, 1);
     piece.x = 3;
     piece.y = 18;
     const locked = lockPiece(board, piece);
-    const result = resolveLock(locked, piece);
-    expect(result.mergedSquaresDestroyed).toBe(0);
-    // Piece group on result board should only cover piece cells (4 cells).
-    const group = locked[18][3]!.group;
-    let groupCount = 0;
-    for (let y = 0; y < BOARD_HEIGHT; y++)
-      for (let x = 0; x < BOARD_WIDTH; x++)
-        if (result.board[y][x]?.group === group) groupCount++;
-    // Cell at (2,18) has color 1 — merges. Cell at (7,18) has color 2 — does not.
-    expect(groupCount).toBe(5);
+    const result = resolveLock(locked);
+    // (2,18) is the same colour and joins; (7,18) is a different colour and does not.
+    expect(result.mergedSquares).toBe(1);
+    expect(countGroup(result.board, locked[18][3]!.group)).toBe(5);
+    expect(strayPairs(result.board)).toBe(0);
   });
 
   it('merges a single contact square', () => {
@@ -128,15 +142,11 @@ describe('merge on same-color contact', () => {
     piece.x = 3;
     piece.y = 18;
     const locked = lockPiece(board, piece);
-    const result = resolveLock(locked, piece);
-    // 1 board square merged with 4-piece block.
-    expect(result.mergedSquaresDestroyed).toBe(0); // no row cleared
-    const group = locked[18][3]!.group;
-    let groupCount = 0;
-    for (let y = 0; y < BOARD_HEIGHT; y++)
-      for (let x = 0; x < BOARD_WIDTH; x++)
-        if (result.board[y][x]?.group === group) groupCount++;
-    expect(groupCount).toBe(5);
+    const result = resolveLock(locked);
+    // 1 board square merged with the 4-piece block.
+    expect(result.mergedSquares).toBe(1);
+    expect(countGroup(result.board, locked[18][3]!.group)).toBe(5);
+    expect(strayPairs(result.board)).toBe(0);
   });
 
   it('does not merge when there is no same-color contact', () => {
@@ -144,7 +154,7 @@ describe('merge on same-color contact', () => {
     setCells(board, [[8, 18, 1]]);
     const piece = createPiece(0, 1);
     const result = setPiece(board, piece);
-    expect(result.mergedSquaresDestroyed).toBe(0);
+    expect(result.mergedSquares).toBe(0);
   });
 });
 
@@ -212,44 +222,48 @@ describe('monochrome row clear', () => {
     piece.y = 16;
     const result = setPiece(board, piece);
     expect(result.hit).toBe(true);
-    expect(result.mergedSquaresDestroyed).toBe(BOARD_WIDTH);
+    expect(result.mergedSquares).toBe(BOARD_WIDTH);
   });
 });
 
 // ── Merge + row clear interaction ────────────────────────────
 
-describe('merged pieces in cleared rows', () => {
-  it('counts merged squares caught in a row clear', () => {
-    // Build a full row of color 1 with a merged piece spanning it.
+describe('merged blocks in cleared rows', () => {
+  it('reports the squares that joined a block when a row closes', () => {
+    // Row 17 is full of colour 1 except for the two gaps the O piece drops into,
+    // so the piece both closes the row and merges with the rest of it.
     const board = createEmptyBoard();
-    // Create a merged piece (O shape = 2×2) sitting on row 18.
-    // Then fill the rest of row 18 with color 1 to make it monochrome.
-    // Actually, let's make row 18 monochrome: fill it with color 1,
-    // and have the locked piece be part of a merge that includes some of these squares.
-    for (let x = 0; x < BOARD_WIDTH; x++) setCells(board, [[x, 18, 1]]);
-    // Lock an O piece on row 17 overlapping row 18 squares.
-    // O piece: [[0,0],[1,0],[0,1],[1,1]]. At x=2, y=16 → covers x=2,3 at y=16,17.
-    // That doesn't reach row 18. Let me use a different approach.
-    //
-    // Better: fill row 18 with color 1 (already done). Lock a piece whose
-    // locked squares are in row 18 — but pieces lock on empty space, and row 18
-    // is full. Can't lock there.
-    //
-    // Better approach: fill row 17 (not 18). Lock piece on row 17 so its squares
-    // are part of the row. The piece's squares count as part of the merge group.
-    const board2 = createEmptyBoard();
-    for (let x = 0; x < BOARD_WIDTH; x++) setCells(board2, [[x, 17, 1]]);
-    // Now lock an O piece at y=16, x=2 → covers (2,16),(3,16),(2,17),(3,17).
-    // The squares at (2,17) and (3,17) are in the monochrome row 17.
-    // After merge, all row 17 squares share group. The O piece's 2 squares in the row
-    // are part of the merged group.
+    for (let x = 0; x < BOARD_WIDTH; x += 1) {
+      if (x === 2 || x === 3) continue;
+      setCells(board, [[x, 17, 1]]);
+    }
     const piece = createPiece(1, 1);
     piece.x = 2;
     piece.y = 16;
-    const locked = lockPiece(board2, piece);
-    const result = resolveLock(locked, piece);
+    const result = setPiece(board, piece);
     expect(result.hit).toBe(true);
-    expect(result.mergedSquaresDestroyed).toBeGreaterThan(0);
+    expect(result.destroyed).toBe(BOARD_WIDTH);
+    // The other eight squares of the row joined the piece's block.
+    expect(result.mergedSquares).toBe(BOARD_WIDTH - 2);
+  });
+
+  it('merges same-color blocks that touch with no piece involved', () => {
+    // Two separate blocks of one colour already touching on the board.
+    const board = createEmptyBoard();
+    setCells(board, [[0, 19, 1], [1, 19, 1]]);
+    board[19][0]!.group = 5;
+    board[19][1]!.group = 6;
+    // A monochrome row above clears on the next lock, whatever that piece is.
+    for (let x = 0; x < BOARD_WIDTH; x += 1) setCells(board, [[x, 18, 2]]);
+    const piece = createPiece(0, 3);
+    piece.x = 3;
+    piece.y = 16;
+    const result = setPiece(board, piece);
+    expect(result.hit).toBe(true);
+    expect(result.destroyed).toBe(BOARD_WIDTH);
+    // The two touching blocks became one, so one square changed block.
+    expect(result.mergedSquares).toBe(1);
+    expect(strayPairs(result.board)).toBe(0);
   });
 });
 
@@ -317,7 +331,7 @@ describe('resolveLock integration', () => {
     piece.x = 3;
     piece.y = 14;
     const locked = lockPiece(board, piece);
-    const result = resolveLock(locked, piece);
+    const result = resolveLock(locked);
     // Row 15 should clear.
     expect(result.hit).toBe(true);
     expect(result.clearedRows.some((r) => r.y === 15)).toBe(true);
